@@ -4,6 +4,7 @@
 #include <vector>
 #include <iostream>
 #include <Eigen/Dense>
+#include <Eigen/Sparse>
 #include <mpi.h>
 
 using namespace std;
@@ -91,22 +92,37 @@ double rbf(double r) {
 void rbf_solve(const MatrixXd& X, const VectorXd& F,
               const int numPoints, const int numNeighbors, VectorXd& C) {
 
-  // Matrix of radial basis function evaluations
-  MatrixXd A(numPoints, numPoints);
+  // Sparse Matrix of radial basis function evaluations
+  std::cout << "Constructing matrix ..." << std::endl;
+
+  typedef Eigen::Triplet<double> T;
+  std::vector<T> tripletList;
+  tripletList.reserve(numPoints * numPoints);
+
+  SparseMatrix<double> A(numPoints, numPoints);
   for (int i = 0; i < numPoints; i++) {
     for (int j = i; j < numPoints; j++) {
       double dx = X(0, i) - X(0, j);
       double dy = X(1, i) - X(1, j);
       double dz = X(2, i) - X(2, j);
-      double r = sqrt(dx*dx + dy*dy + dz*dz);
-      A(i, j) = rbf(r);
-      A(j, i) = A(i, j);
+      double r = rbf(sqrt(dx*dx + dy*dy + dz*dz));
+      tripletList.push_back(T(i,j,r));
+      tripletList.push_back(T(j,i,r));
     }
   }
 
-  // Solve for coefficients
+  A.setFromTriplets(tripletList.begin(), tripletList.end());
+
+  // Solve for coefficients using conjugate gradient
   std::cout << "Started solve ..." << std::endl;
-  C = A.fullPivLu().solve(F);
+
+  ConjugateGradient<SparseMatrix<double>, Lower|Upper> cg;
+  cg.compute(A);
+  C = cg.solve(F);
+
+  std::cout << "#iterations:     " << cg.iterations() << std::endl;
+  std::cout << "estimated error: " << cg.error()      << std::endl;
+
   std::cout << "Finished solve." << std::endl;
 }
 
@@ -123,7 +139,7 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
     const int numFields = 1;
-    const int g_numPoints = 2000; //1000000;
+    const int g_numPoints = 200; //1000000;
     const int g_numTargetPoints = 20; //100000 
 
     // Cluster and decompose on rank 0
@@ -170,12 +186,12 @@ int main(int argc, char** argv) {
         MatrixXd target_points(3, numTargetPoints);
         VectorXi target_clusterAssignments(numTargetPoints);
         for (int i = 0; i < numTargetPoints; i++) {
-            //target_points(0, i) = points(0, i);
-            //target_points(1, i) = points(1, i);
-            //target_points(2, i) = points(2, i);
-            target_points(0, i) = rand() / (double)RAND_MAX;
-            target_points(1, i) = rand() / (double)RAND_MAX;
-            target_points(2, i) = rand() / (double)RAND_MAX;
+            target_points(0, i) = points(0, i);
+            target_points(1, i) = points(1, i);
+            target_points(2, i) = points(2, i);
+            //target_points(0, i) = rand() / (double)RAND_MAX;
+            //target_points(1, i) = rand() / (double)RAND_MAX;
+            //target_points(2, i) = rand() / (double)RAND_MAX;
         }
 
         // Partition the points into N clusters using k-means clustering
