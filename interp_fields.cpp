@@ -85,6 +85,7 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
  *****************/
 
 typedef SparseLU<SparseMatrix<double>> RbfSolver;
+//typedef BiCGSTAB<SparseMatrix<double>, IncompleteLUT<double,int>> RbfSolver;
 
 // Radial basis function
 double rbf(double r) {
@@ -93,7 +94,7 @@ double rbf(double r) {
 
 // Build sparse interpolation matrix and LU decompose it
 void rbf_build(const MatrixXd& X, const int numPoints, const int numNeighbors,
-              RbfSolver& solver
+              RbfSolver& solver, SparseMatrix<double>& A
               ) {
 
   //
@@ -106,7 +107,6 @@ void rbf_build(const MatrixXd& X, const int numPoints, const int numNeighbors,
   std::vector<T> tripletList;
   tripletList.reserve(numPoints * numNeighbors);
 
-  SparseMatrix<double> A(numPoints, numPoints);
   vector<pair<double, int>> neighbors(numPoints);
   for (int i = 0; i < numPoints; i++) {
     for (int j = 0; j < numPoints; j++) {
@@ -169,7 +169,7 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
     const int numFields = 2;
-    const int g_numPoints = 200000; //1000000;
+    const int g_numPoints = 800; //200000; //1000000;
     const int g_numTargetPoints = 5; //100000 
     const int numNeighbors = 8;
 
@@ -352,11 +352,12 @@ int main(int argc, char** argv) {
     /*********************************************
      * Build interpolation matrix and decompose it
      *********************************************/
+    SparseMatrix<double> A(numPoints, numPoints);
     RbfSolver solver;
     VectorXd F(numPoints);
     VectorXd C(numPoints);
 
-    rbf_build(points, numPoints, numNeighbors, solver);
+    rbf_build(points, numPoints, numNeighbors, solver, A);
 
     /*****************************
      * Interpolate target fields
