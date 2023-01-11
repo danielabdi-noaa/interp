@@ -6,6 +6,7 @@
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
 #include <mpi.h>
+#include <chrono>
 
 using namespace std;
 using namespace Eigen;
@@ -92,25 +93,29 @@ double rbf(double r) {
 void rbf_solve(const MatrixXd& X, const VectorXd& F,
               const int numPoints, const int numNeighbors, VectorXd& C) {
 
+  //
   // Sparse Matrix of radial basis function evaluations
-  std::cout << "Constructing matrix ..." << std::endl;
+  //
+  std::cout << "Constructing interpolation matrix ..." << std::endl;
+  auto start = chrono::high_resolution_clock::now();
 
   typedef Eigen::Triplet<double> T;
   std::vector<T> tripletList;
   tripletList.reserve(numPoints * numNeighbors);
 
   SparseMatrix<double> A(numPoints, numPoints);
+  vector<pair<double, int>> neighbors(numPoints);
   for (int i = 0; i < numPoints; i++) {
-    vector<pair<double, int>> neighbors(numPoints);
     for (int j = 0; j < numPoints; j++) {
       double dx = X(0, i) - X(0, j);
       double dy = X(1, i) - X(1, j);
       double dz = X(2, i) - X(2, j);
       double r = sqrt(dx*dx + dy*dy + dz*dz);
-      neighbors[j] = (r, j);
+      neighbors[j] = make_pair(r, j);
     }
-    sort(neighbors.begin(), neighbors.end());
-    neighbors.resize(numNeighbors);
+
+    std::partial_sort(neighbors.begin(), neighbors.begin() + numNeighbors, neighbors.end());
+
     for (int k = 0; k < numNeighbors; k++) {
       int j = neighbors[k].second;
       double r = neighbors[k].first;
@@ -120,17 +125,27 @@ void rbf_solve(const MatrixXd& X, const VectorXd& F,
 
   A.setFromTriplets(tripletList.begin(), tripletList.end());
 
-  // Solve for coefficients using conjugate gradient
+  auto stop = chrono::high_resolution_clock::now();
+  auto duration = chrono::duration_cast<chrono::seconds>(stop - start);
+  std::cout << "Finished in " << duration.count() << " secs." << std::endl;
+
+  //
+  // Solve for the weights x of the Ax=B equations
+  //
   std::cout << "Started solve ..." << std::endl;
+  start = stop;
 
-  BiCGSTAB<SparseMatrix<double>, IncompleteLUT<double,int>> bicg;
-  bicg.compute(A);
-  C = bicg.solve(F);
+  //BiCGSTAB<SparseMatrix<double>, IncompleteLUT<double,int>> solver;
+  SparseLU<SparseMatrix<double>> solver;
+  solver.compute(A);
+  C = solver.solve(F);
 
-  std::cout << "#iterations:     " << bicg.iterations() << std::endl;
-  std::cout << "estimated error: " << bicg.error()      << std::endl;
+  //std::cout << "#iterations:     " << solver.iterations() << std::endl;
+  //std::cout << "estimated error: " << solver.error()      << std::endl;
 
-  std::cout << "Finished solve." << std::endl;
+  stop = chrono::high_resolution_clock::now();
+  duration = chrono::duration_cast<chrono::seconds>(stop - start);
+  std::cout << "Finished in " << duration.count() << " secs." << std::endl;
 }
 
 /*****************
@@ -146,9 +161,9 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
     const int numFields = 1;
-    const int g_numPoints = 200; //1000000;
+    const int g_numPoints = 20000; //1000000;
     const int g_numTargetPoints = 5; //100000 
-    const int numNeighbors = 10;
+    const int numNeighbors = 20;
 
     // Cluster and decompose on rank 0
     const int numClusters = nprocs;
@@ -340,18 +355,18 @@ int main(int argc, char** argv) {
         rbf_solve(points, fields.row(i), numPoints, numNeighbors, C);
 
         //interpolate for target fields
+        vector<pair<double, int>> neighbors(numPoints);
         for(int j = 0; j < numTargetPoints; j++) {
-            vector<pair<double, int>> neighbors;
-            neighbors.reserve(numPoints);
             for (int k = 0; k < numPoints; k++) {
                 double dx = target_points(0, j) - points(0, k);
                 double dy = target_points(1, j) - points(1, k);
                 double dz = target_points(2, j) - points(2, k);
                 double r = sqrt(dx*dx + dy*dy + dz*dz);
-                neighbors.emplace_back(r, k);
+                neighbors[k] = make_pair(r, k);
             }
-            sort(neighbors.begin(), neighbors.end());
-            neighbors.resize(numNeighbors);
+
+            std::partial_sort(neighbors.begin(), neighbors.begin() + numNeighbors, neighbors.end());
+
             for (int m = 0; m < numNeighbors; m++) {
               int k = neighbors[m].second;
               double r = neighbors[m].first;
