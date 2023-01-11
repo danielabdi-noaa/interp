@@ -41,7 +41,7 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
                 double dx = points(0,i) - clusterCenters(0,j);
                 double dy = points(1,i) - clusterCenters(1,j);
                 double dz = points(2,i) - clusterCenters(2,j);
-                double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+                double distance = dx*dx + dy*dy + dz*dz;
                 if (distance < minDistance) {
                     minDistance = distance;
                     closestCluster = j;
@@ -62,7 +62,7 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
             newClusterCenters(0,cluster) += points(0,i);
             newClusterCenters(1,cluster) += points(1,i);
             newClusterCenters(2,cluster) += points(2,i);
-            clusterSizes(cluster) = clusterSizes(cluster) + 1;
+            clusterSizes(cluster)++;
         }
         for (int i = 0; i < numClusters; i++) {
             if (clusterSizes(i) > 0) {
@@ -84,6 +84,8 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
  * RBF interpolation
  *****************/
 
+typedef SparseLU<SparseMatrix<double>> RbfSolver;
+
 // Radial basis function
 double rbf(double r) {
   return exp(-r*r);
@@ -91,11 +93,11 @@ double rbf(double r) {
 
 // Build sparse interpolation matrix and LU decompose it
 void rbf_build(const MatrixXd& X, const int numPoints, const int numNeighbors,
-              SparseLU<SparseMatrix<double>>& solver
+              RbfSolver& solver
               ) {
 
   //
-  // Sparse Matrix of radial basis function evaluations
+  // Build sparse Matrix of radial basis function evaluations
   //
   std::cout << "Constructing interpolation matrix ..." << std::endl;
   auto start = chrono::high_resolution_clock::now();
@@ -111,7 +113,7 @@ void rbf_build(const MatrixXd& X, const int numPoints, const int numNeighbors,
       double dx = X(0, i) - X(0, j);
       double dy = X(1, i) - X(1, j);
       double dz = X(2, i) - X(2, j);
-      double r = sqrt(dx*dx + dy*dy + dz*dz);
+      double r = dx*dx + dy*dy + dz*dz;
       neighbors[j] = make_pair(r, j);
     }
 
@@ -119,7 +121,7 @@ void rbf_build(const MatrixXd& X, const int numPoints, const int numNeighbors,
 
     for (int k = 0; k < numNeighbors; k++) {
       int j = neighbors[k].second;
-      double r = rbf(neighbors[k].first);
+      double r = rbf(sqrt(neighbors[k].first));
       tripletList.push_back(T(i,j,r));
     }
   }
@@ -143,6 +145,17 @@ void rbf_build(const MatrixXd& X, const int numPoints, const int numNeighbors,
   std::cout << "Finished in " << duration.count() << " secs." << std::endl;
 }
 
+// Solve
+void rbf_solve(RbfSolver& solver, const VectorXd& F, VectorXd& C) {
+  std::cout << "Started solve ..." << std::endl;
+  auto start = chrono::high_resolution_clock::now();
+
+  C = solver.solve(F);
+
+  auto stop = chrono::high_resolution_clock::now();
+  auto duration = chrono::duration_cast<chrono::seconds>(stop - start);
+  std::cout << "Finished in " << duration.count() << " secs." << std::endl;
+}
 /*****************
  * Test
  *****************/
@@ -156,9 +169,9 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
     const int numFields = 2;
-    const int g_numPoints = 20000; //1000000;
+    const int g_numPoints = 200000; //1000000;
     const int g_numTargetPoints = 5; //100000 
-    const int numNeighbors = 20;
+    const int numNeighbors = 8;
 
     // Cluster and decompose on rank 0
     const int numClusters = nprocs;
@@ -339,8 +352,7 @@ int main(int argc, char** argv) {
     /*********************************************
      * Build interpolation matrix and decompose it
      *********************************************/
-    SparseLU<SparseMatrix<double>> solver;
-    //BiCGSTAB<SparseMatrix<double>> solver;
+    RbfSolver solver;
     VectorXd F(numPoints);
     VectorXd C(numPoints);
 
@@ -357,7 +369,7 @@ int main(int argc, char** argv) {
 
         //solve weights for this field
         F = fields.row(i);
-        C = solver.solve(F);
+        rbf_solve(solver, F, C);
 
         //interpolate for target fields
         vector<pair<double, int>> neighbors(numPoints);
@@ -366,7 +378,7 @@ int main(int argc, char** argv) {
                 double dx = target_points(0, j) - points(0, k);
                 double dy = target_points(1, j) - points(1, k);
                 double dz = target_points(2, j) - points(2, k);
-                double r = sqrt(dx*dx + dy*dy + dz*dz);
+                double r = dx*dx + dy*dy + dz*dz;
                 neighbors[k] = make_pair(r, k);
             }
 
@@ -375,7 +387,7 @@ int main(int argc, char** argv) {
             for (int m = 0; m < numNeighbors; m++) {
               int k = neighbors[m].second;
               double r = neighbors[m].first;
-              target_fields(i, j) += C(k) * rbf(r);
+              target_fields(i, j) += C(k) * rbf(sqrt(r));
             }
         }
     }
@@ -393,7 +405,7 @@ int main(int argc, char** argv) {
         int offset = 0;
         for(int i = 0; i < numClusters; i++) {
             offsets(i) = offset;
-            counts(i) = clusterSizes(i) * 3;
+            counts(i) = target_clusterSizes(i) * 3;
             offset += counts(i);
         }
     }
@@ -410,7 +422,7 @@ int main(int argc, char** argv) {
         int offset = 0;
         for(int i = 0; i < numClusters; i++) {
             offsets(i) = offset;
-            counts(i) = clusterSizes(i) * numFields;
+            counts(i) = target_clusterSizes(i) * numFields;
             offset += counts(i);
         }
     }
