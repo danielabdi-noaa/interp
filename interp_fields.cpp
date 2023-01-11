@@ -89,9 +89,10 @@ double rbf(double r) {
   return exp(-r*r);
 }
 
-// Solve for RBF coefficients
-void rbf_solve(const MatrixXd& X, const VectorXd& F,
-              const int numPoints, const int numNeighbors, VectorXd& C) {
+// Build sparse interpolation matrix and LU decompose it
+void rbf_build(const MatrixXd& X, const int numPoints, const int numNeighbors,
+              SparseLU<SparseMatrix<double>>& solver
+              ) {
 
   //
   // Sparse Matrix of radial basis function evaluations
@@ -118,8 +119,8 @@ void rbf_solve(const MatrixXd& X, const VectorXd& F,
 
     for (int k = 0; k < numNeighbors; k++) {
       int j = neighbors[k].second;
-      double r = neighbors[k].first;
-      tripletList.push_back(T(i,j,rbf(r)));
+      double r = rbf(neighbors[k].first);
+      tripletList.push_back(T(i,j,r));
     }
   }
 
@@ -130,18 +131,12 @@ void rbf_solve(const MatrixXd& X, const VectorXd& F,
   std::cout << "Finished in " << duration.count() << " secs." << std::endl;
 
   //
-  // Solve for the weights x of the Ax=B equations
+  // LU decomposition of the interpolation matrix
   //
-  std::cout << "Started solve ..." << std::endl;
+  std::cout << "Started LU decomposiiton ..." << std::endl;
   start = stop;
 
-  //BiCGSTAB<SparseMatrix<double>, IncompleteLUT<double,int>> solver;
-  SparseLU<SparseMatrix<double>> solver;
   solver.compute(A);
-  C = solver.solve(F);
-
-  //std::cout << "#iterations:     " << solver.iterations() << std::endl;
-  //std::cout << "estimated error: " << solver.error()      << std::endl;
 
   stop = chrono::high_resolution_clock::now();
   duration = chrono::duration_cast<chrono::seconds>(stop - start);
@@ -160,7 +155,7 @@ int main(int argc, char** argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    const int numFields = 1;
+    const int numFields = 2;
     const int g_numPoints = 20000; //1000000;
     const int g_numTargetPoints = 5; //100000 
     const int numNeighbors = 20;
@@ -200,7 +195,7 @@ int main(int argc, char** argv) {
                 double x = points(0, i);
                 double y = points(1, i);
                 double z = points(2, i);
-                fields(j, i) = x * y *z; //rand() / (double)RAND_MAX;
+                fields(j, i) = x * y * z * (j + 1); //rand() / (double)RAND_MAX;
             }
         }
 
@@ -341,18 +336,28 @@ int main(int argc, char** argv) {
     MPI_Scatterv(target_points_p ? target_points_p->data() : nullptr, counts.data(), offsets.data(), MPI_DOUBLE,
                 target_points.data(), numTargetPoints * 3, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-    /*****************************
-     * Interpolate
-     *****************************/
-
-    //Interpolate on target points
+    /*********************************************
+     * Build interpolation matrix and decompose it
+     *********************************************/
+    SparseLU<SparseMatrix<double>> solver;
+    //BiCGSTAB<SparseMatrix<double>> solver;
+    VectorXd F(numPoints);
     VectorXd C(numPoints);
+
+    rbf_build(points, numPoints, numNeighbors, solver);
+
+    /*****************************
+     * Interpolate target fields
+     *****************************/
     target_fields.setZero();
 
     for(int i = 0; i < numFields; i++) {
 
-        //solve for rbf coefficients for the given field
-        rbf_solve(points, fields.row(i), numPoints, numNeighbors, C);
+        std::cout << "Interpolating field " << i << std::endl;
+
+        //solve weights for this field
+        F = fields.row(i);
+        C = solver.solve(F);
 
         //interpolate for target fields
         vector<pair<double, int>> neighbors(numPoints);
