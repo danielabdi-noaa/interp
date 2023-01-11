@@ -93,8 +93,8 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
 typedef SparseLU<SparseMatrix<double>> RbfSolver;
 //typedef SimplicialLDLT<SparseMatrix<double>, Upper> RbfSolver;
 
-//typedef BiCGSTAB<SparseMatrix<double>, IncompleteLUT<double,int>> RbfSolver;
-//typedef ConjugateGradient<SparseMatrix<double>, Lower|Upper, IncompleteLUT<double,int>> RbfSolver;
+//typedef BiCGSTAB<SparseMatrix<double>> RbfSolver;
+//typedef ConjugateGradient<SparseMatrix<double>, Lower|Upper> RbfSolver;
 
 //
 // Radial basis function
@@ -148,7 +148,7 @@ void rbf_build(const MatrixXd& X, const int numPoints, const int numNeighbors,
   //
   // LU decomposition of the interpolation matrix
   //
-  std::cout << "Started LU decomposiiton ..." << std::endl;
+  std::cout << "Started factorization ..." << std::endl;
   start = stop;
 
   solver.compute(A);
@@ -187,8 +187,10 @@ void rbf_build_symm(const MatrixXd& X, const int numPoints, const int numNeighbo
       double dy = X(1, i) - X(1, j);
       double dz = X(2, i) - X(2, j);
       double r = sqrt(dx*dx + dy*dy + dz*dz);
-      if(r <= cutoff_distance)
+      if(r <= cutoff_distance) {
         tripletList.push_back(T(i,j,rbf(r)));
+        if(i != j) tripletList.push_back(T(j,i,rbf(r)));
+      }
     }
   }
 
@@ -204,7 +206,7 @@ void rbf_build_symm(const MatrixXd& X, const int numPoints, const int numNeighbo
   std::cout << "Started factorization ..." << std::endl;
   start = stop;
 
-  solver.compute(A.selfadjointView<Eigen::Upper>());
+  solver.compute(A);
 
   if(solver.info() != Success) {
      std::cout << "Factorization failed." << std::endl;
@@ -249,7 +251,7 @@ int main(int argc, char** argv) {
     const int g_numPoints = 2000; //200000; //1000000;
     const int g_numTargetPoints = 4; //100000 
     const int numNeighbors = 8;
-    const int numFields = 2;
+    const int numFields = 1;
     const double cutoff_distance = 0.5;
     const bool use_cutoff_distance = true;
 
