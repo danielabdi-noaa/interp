@@ -142,8 +142,8 @@ void rbf_build(const MatrixXd& X, const int numPoints, const int numNeighbors,
   A.setFromTriplets(tripletList.begin(), tripletList.end());
 
   auto stop = chrono::high_resolution_clock::now();
-  auto duration = chrono::duration_cast<chrono::seconds>(stop - start);
-  std::cout << "Finished in " << duration.count() << " secs." << std::endl;
+  auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
+  std::cout << "Finished in " << duration.count() << " milli secs." << std::endl;
 
   //
   // LU decomposition of the interpolation matrix
@@ -159,8 +159,8 @@ void rbf_build(const MatrixXd& X, const int numPoints, const int numNeighbors,
   }
 
   stop = chrono::high_resolution_clock::now();
-  duration = chrono::duration_cast<chrono::seconds>(stop - start);
-  std::cout << "Finished in " << duration.count() << " secs." << std::endl;
+  duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
+  std::cout << "Finished in " << duration.count() << " milli secs." << std::endl;
 }
 
 //
@@ -195,8 +195,8 @@ void rbf_build_symm(const MatrixXd& X, const int numPoints, const int numNeighbo
   A.setFromTriplets(tripletList.begin(), tripletList.end());
 
   auto stop = chrono::high_resolution_clock::now();
-  auto duration = chrono::duration_cast<chrono::seconds>(stop - start);
-  std::cout << "Finished in " << duration.count() << " secs." << std::endl;
+  auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
+  std::cout << "Finished in " << duration.count() << " milli secs." << std::endl;
 
   //
   // LU decomposition of the interpolation matrix
@@ -212,8 +212,8 @@ void rbf_build_symm(const MatrixXd& X, const int numPoints, const int numNeighbo
   }
   
   stop = chrono::high_resolution_clock::now();
-  duration = chrono::duration_cast<chrono::seconds>(stop - start);
-  std::cout << "Finished in " << duration.count() << " secs." << std::endl;
+  duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
+  std::cout << "Finished in " << duration.count() << " milli secs." << std::endl;
 }
 
 //
@@ -221,18 +221,14 @@ void rbf_build_symm(const MatrixXd& X, const int numPoints, const int numNeighbo
 // Iterative solvers don't need LU decompostion to happen first
 //
 void rbf_solve(RbfSolver& solver, const VectorXd& F, VectorXd& C) {
-#if _DEBUG
   std::cout << "Started solve ..." << std::endl;
   auto start = chrono::high_resolution_clock::now();
-#endif
 
   C = solver.solve(F);
 
-#if _DEBUG
   auto stop = chrono::high_resolution_clock::now();
-  auto duration = chrono::duration_cast<chrono::seconds>(stop - start);
-  std::cout << "Finished in " << duration.count() << " secs." << std::endl;
-#endif
+  auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
+  std::cout << "Finished in " << duration.count() << " milli secs." << std::endl;
 }
 
 /*****************
@@ -250,7 +246,7 @@ int main(int argc, char** argv) {
     //
     // Test parameters
     //
-    const int g_numPoints = 10000; //200000; //1000000;
+    const int g_numPoints = 2000; //200000; //1000000;
     const int g_numTargetPoints = 4; //100000 
     const int numNeighbors = 8;
     const int numFields = 2;
@@ -454,7 +450,7 @@ int main(int argc, char** argv) {
 
     for(int i = 0; i < numFields; i++) {
 
-        std::cout << "Interpolating field " << i << std::endl;
+        std::cout << "==== Interpolating field " << i << " ====" << std::endl;
 
         //solve weights for this field
         F = fields.row(i);
