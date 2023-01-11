@@ -90,8 +90,8 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
 // Settings for direct and iterative solvers
 //
 
-//typedef SparseLU<SparseMatrix<double>> RbfSolver;
-typedef SimplicialLDLT<SparseMatrix<double>, Upper> RbfSolver;
+typedef SparseLU<SparseMatrix<double>> RbfSolver;
+//typedef SimplicialLDLT<SparseMatrix<double>, Upper> RbfSolver;
 
 //typedef BiCGSTAB<SparseMatrix<double>, IncompleteLUT<double,int>> RbfSolver;
 //typedef ConjugateGradient<SparseMatrix<double>, Lower|Upper, IncompleteLUT<double,int>> RbfSolver;
