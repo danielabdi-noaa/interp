@@ -97,17 +97,24 @@ void rbf_solve(const MatrixXd& X, const VectorXd& F,
 
   typedef Eigen::Triplet<double> T;
   std::vector<T> tripletList;
-  tripletList.reserve(numPoints * numPoints);
+  tripletList.reserve(numPoints * numNeighbors);
 
   SparseMatrix<double> A(numPoints, numPoints);
   for (int i = 0; i < numPoints; i++) {
-    for (int j = i; j < numPoints; j++) {
+    vector<pair<double, int>> neighbors(numPoints);
+    for (int j = 0; j < numPoints; j++) {
       double dx = X(0, i) - X(0, j);
       double dy = X(1, i) - X(1, j);
       double dz = X(2, i) - X(2, j);
-      double r = rbf(sqrt(dx*dx + dy*dy + dz*dz));
-      tripletList.push_back(T(i,j,r));
-      tripletList.push_back(T(j,i,r));
+      double r = sqrt(dx*dx + dy*dy + dz*dz);
+      neighbors[j] = (r, j);
+    }
+    sort(neighbors.begin(), neighbors.end());
+    neighbors.resize(numNeighbors);
+    for (int k = 0; k < numNeighbors; k++) {
+      int j = neighbors[k].second;
+      double r = neighbors[k].first;
+      tripletList.push_back(T(i,j,rbf(r)));
     }
   }
 
@@ -116,12 +123,12 @@ void rbf_solve(const MatrixXd& X, const VectorXd& F,
   // Solve for coefficients using conjugate gradient
   std::cout << "Started solve ..." << std::endl;
 
-  ConjugateGradient<SparseMatrix<double>, Lower|Upper> cg;
-  cg.compute(A);
-  C = cg.solve(F);
+  BiCGSTAB<SparseMatrix<double>, IncompleteLUT<double,int>> bicg;
+  bicg.compute(A);
+  C = bicg.solve(F);
 
-  std::cout << "#iterations:     " << cg.iterations() << std::endl;
-  std::cout << "estimated error: " << cg.error()      << std::endl;
+  std::cout << "#iterations:     " << bicg.iterations() << std::endl;
+  std::cout << "estimated error: " << bicg.error()      << std::endl;
 
   std::cout << "Finished solve." << std::endl;
 }
@@ -140,11 +147,11 @@ int main(int argc, char** argv) {
 
     const int numFields = 1;
     const int g_numPoints = 200; //1000000;
-    const int g_numTargetPoints = 20; //100000 
+    const int g_numTargetPoints = 5; //100000 
+    const int numNeighbors = 10;
 
     // Cluster and decompose on rank 0
     const int numClusters = nprocs;
-    const int numNeighbors = 4;
 
     MatrixXd* points_p = nullptr;
     MatrixXd* fields_p = nullptr;
@@ -186,12 +193,18 @@ int main(int argc, char** argv) {
         MatrixXd target_points(3, numTargetPoints);
         VectorXi target_clusterAssignments(numTargetPoints);
         for (int i = 0; i < numTargetPoints; i++) {
+            //*/
+            //use same data as sources for testing
+            //should give identical results as the source
             target_points(0, i) = points(0, i);
             target_points(1, i) = points(1, i);
             target_points(2, i) = points(2, i);
-            //target_points(0, i) = rand() / (double)RAND_MAX;
-            //target_points(1, i) = rand() / (double)RAND_MAX;
-            //target_points(2, i) = rand() / (double)RAND_MAX;
+            /*/
+            //use random 3D points
+            target_points(0, i) = rand() / (double)RAND_MAX;
+            target_points(1, i) = rand() / (double)RAND_MAX;
+            target_points(2, i) = rand() / (double)RAND_MAX;
+            //*/
         }
 
         // Partition the points into N clusters using k-means clustering
@@ -328,12 +341,21 @@ int main(int argc, char** argv) {
 
         //interpolate for target fields
         for(int j = 0; j < numTargetPoints; j++) {
-            for(int k = 0; k < numPoints; k++) {
+            vector<pair<double, int>> neighbors;
+            neighbors.reserve(numPoints);
+            for (int k = 0; k < numPoints; k++) {
                 double dx = target_points(0, j) - points(0, k);
                 double dy = target_points(1, j) - points(1, k);
                 double dz = target_points(2, j) - points(2, k);
                 double r = sqrt(dx*dx + dy*dy + dz*dz);
-                target_fields(i, j) += C(k) * rbf(r);
+                neighbors.emplace_back(r, k);
+            }
+            sort(neighbors.begin(), neighbors.end());
+            neighbors.resize(numNeighbors);
+            for (int m = 0; m < numNeighbors; m++) {
+              int k = neighbors[m].second;
+              double r = neighbors[m].first;
+              target_fields(i, j) += C(k) * rbf(r);
             }
         }
     }
