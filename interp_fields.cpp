@@ -15,7 +15,9 @@ using namespace Eigen;
  * Clustering
  *****************/
 
+//
 // Function for partitioning a set of 3D points into N clusters using the k-means clustering algorithm
+//
 void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
         VectorXi& clusterAssignments, VectorXi& clusterSizes, MatrixXd& clusterCenters) {
 
@@ -84,15 +86,26 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
  * RBF interpolation
  *****************/
 
-typedef SparseLU<SparseMatrix<double>> RbfSolver;
-//typedef BiCGSTAB<SparseMatrix<double>, IncompleteLUT<double,int>> RbfSolver;
+//
+// Settings for direct and iterative solvers
+//
 
+//typedef SparseLU<SparseMatrix<double>> RbfSolver;
+typedef SimplicialLDLT<SparseMatrix<double>, Upper> RbfSolver;
+
+//typedef BiCGSTAB<SparseMatrix<double>, IncompleteLUT<double,int>> RbfSolver;
+//typedef ConjugateGradient<SparseMatrix<double>, Lower|Upper, IncompleteLUT<double,int>> RbfSolver;
+
+//
 // Radial basis function
+//
 double rbf(double r) {
   return exp(-r*r);
 }
 
+//
 // Build sparse interpolation matrix and LU decompose it
+//
 void rbf_build(const MatrixXd& X, const int numPoints, const int numNeighbors,
               RbfSolver& solver, SparseMatrix<double>& A
               ) {
@@ -140,22 +153,88 @@ void rbf_build(const MatrixXd& X, const int numPoints, const int numNeighbors,
 
   solver.compute(A);
 
+  if(solver.info() != Success) {
+     std::cout << "Factorization failed." << std::endl;
+     exit(0);
+  }
+
   stop = chrono::high_resolution_clock::now();
   duration = chrono::duration_cast<chrono::seconds>(stop - start);
   std::cout << "Finished in " << duration.count() << " secs." << std::endl;
 }
 
-// Solve
-void rbf_solve(RbfSolver& solver, const VectorXd& F, VectorXd& C) {
-  std::cout << "Started solve ..." << std::endl;
+//
+// Build symmetric sparse interpolation matrix and LU decompose it
+// Consider neighbors of specific distance
+//
+void rbf_build_symm(const MatrixXd& X, const int numPoints, const int numNeighbors,
+              const double cutoff_distance, RbfSolver& solver, SparseMatrix<double>& A
+              ) {
+
+  //
+  // Build sparse Matrix of radial basis function evaluations
+  //
+  std::cout << "Constructing interpolation matrix ..." << std::endl;
   auto start = chrono::high_resolution_clock::now();
 
-  C = solver.solve(F);
+  typedef Eigen::Triplet<double> T;
+  std::vector<T> tripletList;
+  tripletList.reserve(numPoints * numNeighbors);
+
+  for (int i = 0; i < numPoints; i++) {
+    for (int j = i; j < numPoints; j++) {
+      double dx = X(0, i) - X(0, j);
+      double dy = X(1, i) - X(1, j);
+      double dz = X(2, i) - X(2, j);
+      double r = sqrt(dx*dx + dy*dy + dz*dz);
+      if(r <= cutoff_distance)
+        tripletList.push_back(T(i,j,rbf(r)));
+    }
+  }
+
+  A.setFromTriplets(tripletList.begin(), tripletList.end());
 
   auto stop = chrono::high_resolution_clock::now();
   auto duration = chrono::duration_cast<chrono::seconds>(stop - start);
   std::cout << "Finished in " << duration.count() << " secs." << std::endl;
+
+  //
+  // LU decomposition of the interpolation matrix
+  //
+  std::cout << "Started factorization ..." << std::endl;
+  start = stop;
+
+  solver.compute(A.selfadjointView<Eigen::Upper>());
+
+  if(solver.info() != Success) {
+     std::cout << "Factorization failed." << std::endl;
+     exit(0);
+  }
+  
+  stop = chrono::high_resolution_clock::now();
+  duration = chrono::duration_cast<chrono::seconds>(stop - start);
+  std::cout << "Finished in " << duration.count() << " secs." << std::endl;
 }
+
+//
+// Solve Ax=b from solver that already has LU decomposed matrix
+// Iterative solvers don't need LU decompostion to happen first
+//
+void rbf_solve(RbfSolver& solver, const VectorXd& F, VectorXd& C) {
+#if _DEBUG
+  std::cout << "Started solve ..." << std::endl;
+  auto start = chrono::high_resolution_clock::now();
+#endif
+
+  C = solver.solve(F);
+
+#if _DEBUG
+  auto stop = chrono::high_resolution_clock::now();
+  auto duration = chrono::duration_cast<chrono::seconds>(stop - start);
+  std::cout << "Finished in " << duration.count() << " secs." << std::endl;
+#endif
+}
+
 /*****************
  * Test
  *****************/
@@ -168,10 +247,15 @@ int main(int argc, char** argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    const int numFields = 2;
-    const int g_numPoints = 800; //200000; //1000000;
-    const int g_numTargetPoints = 5; //100000 
+    //
+    // Test parameters
+    //
+    const int g_numPoints = 10000; //200000; //1000000;
+    const int g_numTargetPoints = 4; //100000 
     const int numNeighbors = 8;
+    const int numFields = 2;
+    const double cutoff_distance = 0.5;
+    const bool use_cutoff_distance = true;
 
     // Cluster and decompose on rank 0
     const int numClusters = nprocs;
@@ -294,6 +378,7 @@ int main(int argc, char** argv) {
     /*****************************
      * Scatter data
      *****************************/
+
     // Get the local points and fields assigned to this rank
     int numPoints;
     MPI_Scatter(clusterSizes.data(), 1, MPI_INT,
@@ -357,7 +442,10 @@ int main(int argc, char** argv) {
     VectorXd F(numPoints);
     VectorXd C(numPoints);
 
-    rbf_build(points, numPoints, numNeighbors, solver, A);
+    if(use_cutoff_distance)
+        rbf_build_symm(points, numPoints, numNeighbors, cutoff_distance, solver, A);
+    else
+        rbf_build(points, numPoints, numNeighbors, solver, A);
 
     /*****************************
      * Interpolate target fields
@@ -373,28 +461,41 @@ int main(int argc, char** argv) {
         rbf_solve(solver, F, C);
 
         //interpolate for target fields
-        vector<pair<double, int>> neighbors(numPoints);
-        for(int j = 0; j < numTargetPoints; j++) {
-            for (int k = 0; k < numPoints; k++) {
-                double dx = target_points(0, j) - points(0, k);
-                double dy = target_points(1, j) - points(1, k);
-                double dz = target_points(2, j) - points(2, k);
-                double r = dx*dx + dy*dy + dz*dz;
-                neighbors[k] = make_pair(r, k);
+        if(use_cutoff_distance) {
+            for(int j = 0; j < numTargetPoints; j++) {
+                for (int k = 0; k < numPoints; k++) {
+                    double dx = target_points(0, j) - points(0, k);
+                    double dy = target_points(1, j) - points(1, k);
+                    double dz = target_points(2, j) - points(2, k);
+                    double r = sqrt(dx*dx + dy*dy + dz*dz);
+                    if(r <= cutoff_distance)
+                        target_fields(i, j) += C(k) * rbf(r);
+                }
             }
+        } else {
+            vector<pair<double, int>> neighbors(numPoints);
+            for(int j = 0; j < numTargetPoints; j++) {
+                for (int k = 0; k < numPoints; k++) {
+                    double dx = target_points(0, j) - points(0, k);
+                    double dy = target_points(1, j) - points(1, k);
+                    double dz = target_points(2, j) - points(2, k);
+                    double r = dx*dx + dy*dy + dz*dz;
+                    neighbors[k] = make_pair(r, k);
+                }
 
-            std::partial_sort(neighbors.begin(), neighbors.begin() + numNeighbors, neighbors.end());
+                std::partial_sort(neighbors.begin(), neighbors.begin() + numNeighbors, neighbors.end());
 
-            for (int m = 0; m < numNeighbors; m++) {
-              int k = neighbors[m].second;
-              double r = neighbors[m].first;
-              target_fields(i, j) += C(k) * rbf(sqrt(r));
+                for (int m = 0; m < numNeighbors; m++) {
+                  int k = neighbors[m].second;
+                  double r = neighbors[m].first;
+                  target_fields(i, j) += C(k) * rbf(sqrt(r));
+                }
             }
         }
     }
 
     /*****************************
-     * Gather target points
+     * Gather target points & fields
      *****************************/
 
     //Gather target points
@@ -432,7 +533,7 @@ int main(int argc, char** argv) {
                 MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
     /*****************************
-     * print
+     * Finalize
      *****************************/
 
     //print
@@ -448,5 +549,4 @@ int main(int argc, char** argv) {
 
     return 0;
 }
-
 
