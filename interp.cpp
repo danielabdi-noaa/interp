@@ -19,31 +19,31 @@ using namespace Eigen;
 // Point cloud data type
 class PointCloud {
 
-private:
-    MatrixXd& point_cloud;
-    size_t num_points;
+    private:
+        MatrixXd& point_cloud;
+        size_t num_points;
 
-public:
-    PointCloud(MatrixXd& pc, size_t np) :
-        point_cloud(pc), num_points(np) {
-    }
+    public:
+        PointCloud(MatrixXd& pc, size_t np) :
+            point_cloud(pc), num_points(np) {
+            }
 
-    /*needed by nanoflann*/
-    inline size_t kdtree_get_point_count() const { return num_points; }
+        /*functions needed by nanoflann*/
+        inline size_t kdtree_get_point_count() const { return num_points; }
 
-    inline double kdtree_get_pt(const size_t idx, int dim) const {
-        return point_cloud(dim,idx);
-    }
+        inline double kdtree_get_pt(const size_t idx, int dim) const {
+            return point_cloud(dim,idx);
+        }
 
-    template <class BBOX>
-    bool kdtree_get_bbox(BBOX& /* bb */) const { return false; }
+        template <class BBOX>
+        bool kdtree_get_bbox(BBOX& /* bb */) const { return false; }
 
 };
 
 //typdef nanonflann KDTree
 typedef nanoflann::KDTreeSingleIndexAdaptor<
-        nanoflann::L2_Simple_Adaptor<double, PointCloud>, 
-        PointCloud, 3> KDTree;
+    nanoflann::L2_Simple_Adaptor<double, PointCloud>, 
+    PointCloud, 3> KDTree;
 
 //find k nearaset neighbors at location "query" and return indices and distances
 void knn(const KDTree& index, int k, double* query, size_t* indices, double* distances) {
@@ -54,8 +54,8 @@ void knn(const KDTree& index, int k, double* query, size_t* indices, double* dis
 
 //find nearaset neighbors with in a given radius at location "query"
 unsigned int knn_radius(const KDTree& index, double radius, double* query,
-    std::vector<nanoflann::ResultItem<unsigned, double>>& matches
-) {
+        std::vector<nanoflann::ResultItem<unsigned, double>>& matches
+        ) {
     return index.radiusSearch(query, radius * radius, matches, nanoflann::SearchParameters());
 }
 
@@ -130,8 +130,8 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
     //Print final cluster sizes
     for (int i = 0; i < numClusters; i++) {
         std::cout << "cluster " << i << " with centroid ("
-                  << clusterCenters.col(i).transpose() << ") and "
-                  << clusterSizes(i) << " points" << std::endl;
+            << clusterCenters.col(i).transpose() << ") and "
+            << clusterSizes(i) << " points" << std::endl;
     }
 
     auto stop = chrono::high_resolution_clock::now();
@@ -140,12 +140,11 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
 }
 
 /**************************************************************
- * RBF interpolation using Eigen for solving the Ax=B equation
+ * Define Solver for Ax=B equation from Eigen
+ * Depending on how you construct the interpolation matrix choose
+ * the right solver. LU vs Cholesky decomp, direct vs iterative etc.
+ * Only one solver can be chosen at one time.
  **************************************************************/
-
-//
-// Settings for direct and iterative solvers
-//
 
 typedef SparseLU<SparseMatrix<double>> RbfSolver;
 //typedef SimplicialLDLT<SparseMatrix<double>, Upper> RbfSolver;
@@ -153,128 +152,135 @@ typedef SparseLU<SparseMatrix<double>> RbfSolver;
 //typedef BiCGSTAB<SparseMatrix<double>> RbfSolver;
 //typedef ConjugateGradient<SparseMatrix<double>, Lower|Upper> RbfSolver;
 
+
+/**************************************************************
+ * RBF interpolation using nearest neighbor search
+ **************************************************************/
+
 //
 // Radial basis function
 //
 double rbf(double r) {
-  return exp(-r*r);
+    return exp(-r*r);
 }
 
 //
 // Build sparse interpolation matrix and LU decompose it
 //
-void rbf_build(const KDTree& index, const MatrixXd& X, const int numPoints, const int numNeighbors,
-              RbfSolver& solver, SparseMatrix<double>& A
-              ) {
+void rbf_build(const KDTree& index, const MatrixXd& X,
+        const int numPoints, const int numNeighbors,
+        RbfSolver& solver, SparseMatrix<double>& A
+        ) {
 
-  //
-  // Build sparse Matrix of radial basis function evaluations
-  //
-  std::cout << "Constructing interpolation matrix ..." << std::endl;
-  auto start = chrono::high_resolution_clock::now();
+    //
+    // Build sparse Matrix of radial basis function evaluations
+    //
+    std::cout << "Constructing interpolation matrix ..." << std::endl;
+    auto start = chrono::high_resolution_clock::now();
 
-  typedef Eigen::Triplet<double> T;
-  std::vector<T> tripletList;
-  tripletList.reserve(numPoints * numNeighbors);
+    typedef Eigen::Triplet<double> T;
+    std::vector<T> tripletList;
+    tripletList.reserve(numPoints * numNeighbors);
 
-  vector<size_t> indices(numNeighbors);
-  vector<double> distances(numNeighbors);
-  VectorXd query(3);
-  for (int i = 0; i < numPoints; i++) {
+    vector<size_t> indices(numNeighbors);
+    vector<double> distances(numNeighbors);
+    VectorXd query(3);
+    for (int i = 0; i < numPoints; i++) {
 
-    // Perform the k-nearest neighbor search
-    query = X.col(i);
-    knn(index, numNeighbors, query.data(), &indices[0], &distances[0]);
+        // Perform the k-nearest neighbor search
+        query = X.col(i);
+        knn(index, numNeighbors, query.data(), &indices[0], &distances[0]);
 
-    // Add matrix coefficients
-    for (int k = 0; k < numNeighbors; k++) {
-      int j = indices[k];
-      double r = rbf(sqrt(distances[k]));
-      tripletList.push_back(T(i,j,r));
+        // Add matrix coefficients
+        for (int k = 0; k < numNeighbors; k++) {
+            int j = indices[k];
+            double r = rbf(sqrt(distances[k]));
+            tripletList.push_back(T(i,j,r));
+        }
     }
-  }
 
-  A.setFromTriplets(tripletList.begin(), tripletList.end());
+    A.setFromTriplets(tripletList.begin(), tripletList.end());
 
-  auto stop = chrono::high_resolution_clock::now();
-  auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-  std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
+    auto stop = chrono::high_resolution_clock::now();
+    auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
+    std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
 
-  //
-  // LU decomposition of the interpolation matrix
-  //
-  std::cout << "Started factorization ..." << std::endl;
-  start = stop;
+    //
+    // LU decomposition of the interpolation matrix
+    //
+    std::cout << "Started factorization ..." << std::endl;
+    start = stop;
 
-  solver.compute(A);
+    solver.compute(A);
 
-  if(solver.info() != Success) {
-     std::cout << "Factorization failed." << std::endl;
-     exit(0);
-  }
+    if(solver.info() != Success) {
+        std::cout << "Factorization failed." << std::endl;
+        exit(0);
+    }
 
-  stop = chrono::high_resolution_clock::now();
-  duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-  std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
+    stop = chrono::high_resolution_clock::now();
+    duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
+    std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
 }
 
 //
 // Build symmetric sparse interpolation matrix and LU decompose it
 // Consider neighbors of specific distance
 //
-void rbf_build_symm(const KDTree& index, const MatrixXd& X, const int numPoints, const int numNeighbors,
-              const double cutoff_radius, RbfSolver& solver, SparseMatrix<double>& A
-              ) {
+void rbf_build_symm(const KDTree& index, const MatrixXd& X,
+        const int numPoints, const int numNeighbors, const double cutoff_radius,
+        RbfSolver& solver, SparseMatrix<double>& A
+        ) {
 
-  //
-  // Build sparse Matrix of radial basis function evaluations
-  //
-  std::cout << "Constructing interpolation matrix ..." << std::endl;
-  auto start = chrono::high_resolution_clock::now();
+    //
+    // Build sparse Matrix of radial basis function evaluations
+    //
+    std::cout << "Constructing interpolation matrix ..." << std::endl;
+    auto start = chrono::high_resolution_clock::now();
 
-  typedef Eigen::Triplet<double> T;
-  std::vector<T> tripletList;
-  tripletList.reserve(numPoints * numNeighbors);
+    typedef Eigen::Triplet<double> T;
+    std::vector<T> tripletList;
+    tripletList.reserve(numPoints * numNeighbors);
 
-  VectorXd query(3);
-  std::vector<nanoflann::ResultItem<unsigned, double>> matches;
-  for (int i = 0; i < numPoints; i++) {
+    VectorXd query(3);
+    std::vector<nanoflann::ResultItem<unsigned, double>> matches;
+    for (int i = 0; i < numPoints; i++) {
 
-    // Perform a radius search
-    query = X.col(i);
-    unsigned nMatches = knn_radius(index, cutoff_radius, query.data(), matches);
+        // Perform a radius search
+        query = X.col(i);
+        unsigned nMatches = knn_radius(index, cutoff_radius, query.data(), matches);
 
-    // Add matrix coefficients
-    for (int k = 0; k < nMatches; k++) {
-      int j = matches[k].first;
-      double r = rbf(sqrt(matches[k].second));
-      tripletList.push_back(T(i,j,r));
+        // Add matrix coefficients
+        for (int k = 0; k < nMatches; k++) {
+            int j = matches[k].first;
+            double r = rbf(sqrt(matches[k].second));
+            tripletList.push_back(T(i,j,r));
+        }
+
     }
 
-  }
+    A.setFromTriplets(tripletList.begin(), tripletList.end());
 
-  A.setFromTriplets(tripletList.begin(), tripletList.end());
+    auto stop = chrono::high_resolution_clock::now();
+    auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
+    std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
 
-  auto stop = chrono::high_resolution_clock::now();
-  auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-  std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
+    //
+    // LU decomposition of the interpolation matrix
+    //
+    std::cout << "Started factorization ..." << std::endl;
+    start = stop;
 
-  //
-  // LU decomposition of the interpolation matrix
-  //
-  std::cout << "Started factorization ..." << std::endl;
-  start = stop;
+    solver.compute(A);
 
-  solver.compute(A);
+    if(solver.info() != Success) {
+        std::cout << "Factorization failed." << std::endl;
+        exit(0);
+    }
 
-  if(solver.info() != Success) {
-     std::cout << "Factorization failed." << std::endl;
-     exit(0);
-  }
-  
-  stop = chrono::high_resolution_clock::now();
-  duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-  std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
+    stop = chrono::high_resolution_clock::now();
+    duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
+    std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
 }
 
 //
@@ -282,14 +288,14 @@ void rbf_build_symm(const KDTree& index, const MatrixXd& X, const int numPoints,
 // Iterative solvers don't need LU decompostion to happen first
 //
 void rbf_solve(RbfSolver& solver, const VectorXd& F, VectorXd& C) {
-  std::cout << "Started solve ..." << std::endl;
-  auto start = chrono::high_resolution_clock::now();
+    std::cout << "Started solve ..." << std::endl;
+    auto start = chrono::high_resolution_clock::now();
 
-  C = solver.solve(F);
+    C = solver.solve(F);
 
-  auto stop = chrono::high_resolution_clock::now();
-  auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-  std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
+    auto stop = chrono::high_resolution_clock::now();
+    auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
+    std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
 }
 
 /*****************
@@ -307,13 +313,22 @@ int main(int argc, char** argv) {
     //
     // Test parameters
     //
-    const int g_numPoints = 2000;
+    const int g_numPoints = 200000;
     const int g_numTargetPoints = 4;
     const int numNeighbors = 8;
     const int numFields = 1;
 
     const bool use_cutoff_radius = false;
     const double cutoff_radius = 0.5;
+    
+    if(rank == 0) {
+        std::cout << "===== Parameters ====" << std::endl
+                  << "numPoints: " << g_numPoints << std::endl
+                  << "numTargetPoints: " << g_numTargetPoints << std::endl
+                  << "numNeighbors: " << numNeighbors << std::endl
+                  << "numFields: " << numFields << std::endl
+                  << "=====================" << std::endl;
+    }
 
     //
     // points, fields and target points all set by rank 0
@@ -334,7 +349,7 @@ int main(int argc, char** argv) {
     {
         const int numPoints = g_numPoints;
         const int numTargetPoints = g_numTargetPoints;
- 
+
         // coordinates and fields to interpolate
         MatrixXd points(3,numPoints);
         MatrixXd fields(numFields,numPoints);
@@ -376,7 +391,7 @@ int main(int argc, char** argv) {
 
         // Partition the points into N clusters using k-means clustering
         kMeansClustering(points, numPoints, numClusters,
-                        clusterAssignments, clusterSizes, clusterCenters);
+                clusterAssignments, clusterSizes, clusterCenters);
 
         // Sort points and fields
         points_p = new MatrixXd(3, numPoints);
@@ -442,7 +457,7 @@ int main(int argc, char** argv) {
     // Get the local points and fields assigned to this rank
     int numPoints;
     MPI_Scatter(clusterSizes.data(), 1, MPI_INT,
-                &numPoints, 1, MPI_INT, 0, MPI_COMM_WORLD);
+            &numPoints, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     MatrixXd points(3, numPoints);
     MatrixXd fields(numFields, numPoints);
@@ -459,7 +474,7 @@ int main(int argc, char** argv) {
         }
     }
     MPI_Scatterv(points_p ? points_p->data() : nullptr, counts.data(), offsets.data(), MPI_DOUBLE,
-                points.data(), numPoints * 3, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+            points.data(), numPoints * 3, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
     //scatter fields
     if(rank == 0) {
@@ -471,12 +486,12 @@ int main(int argc, char** argv) {
         }
     }
     MPI_Scatterv(fields_p ? fields_p->data() : nullptr, counts.data(), offsets.data(), MPI_DOUBLE,
-                fields.data(), numPoints * numFields, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+            fields.data(), numPoints * numFields, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
     //Get local target points assinged to this rank
     int numTargetPoints;
     MPI_Scatter(target_clusterSizes.data(), 1, MPI_INT,
-                &numTargetPoints, 1, MPI_INT, 0, MPI_COMM_WORLD);
+            &numTargetPoints, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     MatrixXd target_points(3, numTargetPoints);
     MatrixXd target_fields(numFields, numTargetPoints);
@@ -492,7 +507,7 @@ int main(int argc, char** argv) {
     }
 
     MPI_Scatterv(target_points_p ? target_points_p->data() : nullptr, counts.data(), offsets.data(), MPI_DOUBLE,
-                target_points.data(), numTargetPoints * 3, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+            target_points.data(), numTargetPoints * 3, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
 
     /*********************************************
@@ -501,7 +516,7 @@ int main(int argc, char** argv) {
     PointCloud cloud(points, numPoints);
     KDTree index(3, cloud, nanoflann::KDTreeSingleIndexAdaptorParams());
     index.buildIndex();
-    
+
     /*********************************************
      * Build interpolation matrix and decompose it
      *********************************************/
@@ -533,32 +548,32 @@ int main(int argc, char** argv) {
             VectorXd query(3);
             std::vector<nanoflann::ResultItem<unsigned, double>> matches;
             for (int i = 0; i < numTargetPoints; i++) {
-              // Perform a radius search
-              query = target_points.col(i);
-              unsigned nMatches = knn_radius(index, cutoff_radius, query.data(), matches);
+                // Perform a radius search
+                query = target_points.col(i);
+                unsigned nMatches = knn_radius(index, cutoff_radius, query.data(), matches);
 
-              // interpolate
-              for (int k = 0; k < nMatches; k++) {
-                int j = matches[k].first;
-                double r = rbf(sqrt(matches[k].second));
-                target_fields(f, i) += C(j) * r;
-              }
+                // interpolate
+                for (int k = 0; k < nMatches; k++) {
+                    int j = matches[k].first;
+                    double r = rbf(sqrt(matches[k].second));
+                    target_fields(f, i) += C(j) * r;
+                }
             }
         } else {
             VectorXd query(3);
             vector<size_t> indices(numNeighbors);
             vector<double> distances(numNeighbors);
             for (int i = 0; i < numTargetPoints; i++) {
-              // Perform the k-nearest neighbor search
-              query = target_points.col(i);
-              knn(index, numNeighbors, query.data(), &indices[0], &distances[0]);
+                // Perform the k-nearest neighbor search
+                query = target_points.col(i);
+                knn(index, numNeighbors, query.data(), &indices[0], &distances[0]);
 
-              // interpolate
-              for (int k = 0; k < numNeighbors; k++) {
-                int j = indices[k];
-                double r = rbf(sqrt(distances[k]));
-                target_fields(f, i) += C(j) * r;
-              }
+                // interpolate
+                for (int k = 0; k < numNeighbors; k++) {
+                    int j = indices[k];
+                    double r = rbf(sqrt(distances[k]));
+                    target_fields(f, i) += C(j) * r;
+                }
             }
         }
     }
@@ -581,8 +596,8 @@ int main(int argc, char** argv) {
         }
     }
     MPI_Gatherv(target_points.data(), numTargetPoints * 3, MPI_DOUBLE,
-                all_target_points ? all_target_points->data() : nullptr, counts.data(), offsets.data(),
-                MPI_DOUBLE, 0, MPI_COMM_WORLD);
+            all_target_points ? all_target_points->data() : nullptr, counts.data(), offsets.data(),
+            MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
     //Gather interpolated fields
     MatrixXd* all_target_fields = nullptr;
@@ -598,8 +613,8 @@ int main(int argc, char** argv) {
         }
     }
     MPI_Gatherv(target_fields.data(), numTargetPoints * numFields, MPI_DOUBLE,
-                all_target_fields ? all_target_fields->data() : nullptr, counts.data(), offsets.data(),
-                MPI_DOUBLE, 0, MPI_COMM_WORLD);
+            all_target_fields ? all_target_fields->data() : nullptr, counts.data(), offsets.data(),
+            MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
     /*****************************
      * Finalize
