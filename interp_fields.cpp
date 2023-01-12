@@ -7,9 +7,57 @@
 #include <Eigen/Sparse>
 #include <mpi.h>
 #include <chrono>
+#include "knn/nanoflann.hpp"
 
 using namespace std;
 using namespace Eigen;
+
+/***************************************************
+ * Nearest neighbor search using nanoflann library
+ **************************************************/
+
+// Point cloud data type
+class PointCloud {
+
+private:
+    MatrixXd& point_cloud;
+    size_t num_points;
+
+public:
+    PointCloud(MatrixXd& pc, size_t np) :
+        point_cloud(pc), num_points(np) {
+    }
+
+    /*needed by nanoflann*/
+    inline size_t kdtree_get_point_count() const { return num_points; }
+
+    inline double kdtree_get_pt(const size_t idx, int dim) const {
+        return point_cloud(dim,idx);
+    }
+
+    template <class BBOX>
+    bool kdtree_get_bbox(BBOX& /* bb */) const { return false; }
+
+};
+
+//typdef nanonflann KDTree
+typedef nanoflann::KDTreeSingleIndexAdaptor<
+        nanoflann::L2_Simple_Adaptor<double, PointCloud>, 
+        PointCloud, 3> KDTree;
+
+//find k nearaset neighbors at location "query" and return indices and distances
+void knn(const KDTree& index, int k, double* query, size_t* indices, double* distances) {
+    nanoflann::KNNResultSet<double> resultSet(k);
+    resultSet.init(indices, distances);
+    index.findNeighbors(resultSet, query, nanoflann::SearchParameters());
+}
+
+//find nearaset neighbors with in a given radius at location "query"
+unsigned int knn_radius(const KDTree& index, double radius, double* query,
+    std::vector<nanoflann::ResultItem<unsigned, double>>& matches
+) {
+    return index.radiusSearch(query, radius * radius, matches, nanoflann::SearchParameters());
+}
 
 /*****************
  * Clustering
@@ -106,7 +154,7 @@ double rbf(double r) {
 //
 // Build sparse interpolation matrix and LU decompose it
 //
-void rbf_build(const MatrixXd& X, const int numPoints, const int numNeighbors,
+void rbf_build(const KDTree& index, const MatrixXd& X, const int numPoints, const int numNeighbors,
               RbfSolver& solver, SparseMatrix<double>& A
               ) {
 
@@ -120,21 +168,19 @@ void rbf_build(const MatrixXd& X, const int numPoints, const int numNeighbors,
   std::vector<T> tripletList;
   tripletList.reserve(numPoints * numNeighbors);
 
-  vector<pair<double, int>> neighbors(numPoints);
+  vector<size_t> indices(numNeighbors);
+  vector<double> distances(numNeighbors);
+  VectorXd query(3);
   for (int i = 0; i < numPoints; i++) {
-    for (int j = 0; j < numPoints; j++) {
-      double dx = X(0, i) - X(0, j);
-      double dy = X(1, i) - X(1, j);
-      double dz = X(2, i) - X(2, j);
-      double r = dx*dx + dy*dy + dz*dz;
-      neighbors[j] = make_pair(r, j);
-    }
 
-    std::partial_sort(neighbors.begin(), neighbors.begin() + numNeighbors, neighbors.end());
+    // Perform the k-nearest neighbor search
+    query = X.col(i);
+    knn(index, numNeighbors, query.data(), &indices[0], &distances[0]);
 
+    // Add matrix coefficients
     for (int k = 0; k < numNeighbors; k++) {
-      int j = neighbors[k].second;
-      double r = rbf(sqrt(neighbors[k].first));
+      int j = indices[k];
+      double r = rbf(sqrt(distances[k]));
       tripletList.push_back(T(i,j,r));
     }
   }
@@ -167,8 +213,8 @@ void rbf_build(const MatrixXd& X, const int numPoints, const int numNeighbors,
 // Build symmetric sparse interpolation matrix and LU decompose it
 // Consider neighbors of specific distance
 //
-void rbf_build_symm(const MatrixXd& X, const int numPoints, const int numNeighbors,
-              const double cutoff_distance, RbfSolver& solver, SparseMatrix<double>& A
+void rbf_build_symm(const KDTree& index, const MatrixXd& X, const int numPoints, const int numNeighbors,
+              const double cutoff_radius, RbfSolver& solver, SparseMatrix<double>& A
               ) {
 
   //
@@ -181,17 +227,21 @@ void rbf_build_symm(const MatrixXd& X, const int numPoints, const int numNeighbo
   std::vector<T> tripletList;
   tripletList.reserve(numPoints * numNeighbors);
 
+  VectorXd query(3);
+  std::vector<nanoflann::ResultItem<unsigned, double>> matches;
   for (int i = 0; i < numPoints; i++) {
-    for (int j = i; j < numPoints; j++) {
-      double dx = X(0, i) - X(0, j);
-      double dy = X(1, i) - X(1, j);
-      double dz = X(2, i) - X(2, j);
-      double r = sqrt(dx*dx + dy*dy + dz*dz);
-      if(r <= cutoff_distance) {
-        tripletList.push_back(T(i,j,rbf(r)));
-        if(i != j) tripletList.push_back(T(j,i,rbf(r)));
-      }
+
+    // Perform a radius search
+    query = X.col(i);
+    unsigned nMatches = knn_radius(index, cutoff_radius, query.data(), matches);
+
+    // Add matrix coefficients
+    for (int k = 0; k < nMatches; k++) {
+      int j = matches[k].first;
+      double r = rbf(sqrt(matches[k].second));
+      tripletList.push_back(T(i,j,r));
     }
+
   }
 
   A.setFromTriplets(tripletList.begin(), tripletList.end());
@@ -248,12 +298,12 @@ int main(int argc, char** argv) {
     //
     // Test parameters
     //
-    const int g_numPoints = 2000; //200000; //1000000;
+    const int g_numPoints = 20; //200000; //1000000;
     const int g_numTargetPoints = 4; //100000 
     const int numNeighbors = 8;
     const int numFields = 1;
-    const double cutoff_distance = 0.5;
-    const bool use_cutoff_distance = true;
+    const double cutoff_radius = 0.5;
+    const bool use_cutoff_radius = true;
 
     // Cluster and decompose on rank 0
     const int numClusters = nprocs;
@@ -432,6 +482,14 @@ int main(int argc, char** argv) {
     MPI_Scatterv(target_points_p ? target_points_p->data() : nullptr, counts.data(), offsets.data(), MPI_DOUBLE,
                 target_points.data(), numTargetPoints * 3, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
+
+    /*********************************************
+     * Build KD tree for nearest neighbor search
+     *********************************************/
+    PointCloud cloud(points, numPoints);
+    KDTree index(3, cloud, nanoflann::KDTreeSingleIndexAdaptorParams());
+    index.buildIndex();
+    
     /*********************************************
      * Build interpolation matrix and decompose it
      *********************************************/
@@ -440,54 +498,55 @@ int main(int argc, char** argv) {
     VectorXd F(numPoints);
     VectorXd C(numPoints);
 
-    if(use_cutoff_distance)
-        rbf_build_symm(points, numPoints, numNeighbors, cutoff_distance, solver, A);
+    if(use_cutoff_radius)
+        rbf_build_symm(index, points, numPoints, numNeighbors, cutoff_radius, solver, A);
     else
-        rbf_build(points, numPoints, numNeighbors, solver, A);
+        rbf_build(index, points, numPoints, numNeighbors, solver, A);
 
     /*****************************
      * Interpolate target fields
      *****************************/
     target_fields.setZero();
 
-    for(int i = 0; i < numFields; i++) {
+    for(int f = 0; f < numFields; f++) {
 
-        std::cout << "==== Interpolating field " << i << " ====" << std::endl;
+        std::cout << "==== Interpolating field " << f << " ====" << std::endl;
 
         //solve weights for this field
-        F = fields.row(i);
+        F = fields.row(f);
         rbf_solve(solver, F, C);
 
         //interpolate for target fields
-        if(use_cutoff_distance) {
-            for(int j = 0; j < numTargetPoints; j++) {
-                for (int k = 0; k < numPoints; k++) {
-                    double dx = target_points(0, j) - points(0, k);
-                    double dy = target_points(1, j) - points(1, k);
-                    double dz = target_points(2, j) - points(2, k);
-                    double r = sqrt(dx*dx + dy*dy + dz*dz);
-                    if(r <= cutoff_distance)
-                        target_fields(i, j) += C(k) * rbf(r);
-                }
+        if(use_cutoff_radius) {
+            VectorXd query(3);
+            std::vector<nanoflann::ResultItem<unsigned, double>> matches;
+            for (int i = 0; i < numTargetPoints; i++) {
+              // Perform a radius search
+              query = target_points.col(i);
+              unsigned nMatches = knn_radius(index, cutoff_radius, query.data(), matches);
+
+              // interpolate
+              for (int k = 0; k < nMatches; k++) {
+                int j = matches[k].first;
+                double r = rbf(sqrt(matches[k].second));
+                target_fields(f, i) += C(j) * r;
+              }
             }
         } else {
-            vector<pair<double, int>> neighbors(numPoints);
-            for(int j = 0; j < numTargetPoints; j++) {
-                for (int k = 0; k < numPoints; k++) {
-                    double dx = target_points(0, j) - points(0, k);
-                    double dy = target_points(1, j) - points(1, k);
-                    double dz = target_points(2, j) - points(2, k);
-                    double r = dx*dx + dy*dy + dz*dz;
-                    neighbors[k] = make_pair(r, k);
-                }
+            VectorXd query(3);
+            vector<size_t> indices(numNeighbors);
+            vector<double> distances(numNeighbors);
+            for (int i = 0; i < numTargetPoints; i++) {
+              // Perform the k-nearest neighbor search
+              query = target_points.col(i);
+              knn(index, numNeighbors, query.data(), &indices[0], &distances[0]);
 
-                std::partial_sort(neighbors.begin(), neighbors.begin() + numNeighbors, neighbors.end());
-
-                for (int m = 0; m < numNeighbors; m++) {
-                  int k = neighbors[m].second;
-                  double r = neighbors[m].first;
-                  target_fields(i, j) += C(k) * rbf(sqrt(r));
-                }
+              // interpolate
+              for (int k = 0; k < numNeighbors; k++) {
+                int j = indices[k];
+                double r = rbf(sqrt(distances[k]));
+                target_fields(f, i) += C(j) * r;
+              }
             }
         }
     }
