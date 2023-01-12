@@ -64,9 +64,6 @@ unsigned int knn_radius(const KDTree& index, double radius, double* query,
  * Easy to implement and not that critical, so lets do it ourselves.
  ********************************************************************/
 
-//
-// Function for partitioning a set of 3D points into N clusters using the k-means clustering algorithm
-//
 void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
         VectorXi& clusterAssignments, VectorXi& clusterSizes, MatrixXd& clusterCenters) {
 
@@ -149,9 +146,10 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
 typedef SparseLU<SparseMatrix<double>> RbfSolver;
 //typedef SimplicialLDLT<SparseMatrix<double>, Upper> RbfSolver;
 
-//typedef BiCGSTAB<SparseMatrix<double>> RbfSolver;
-//typedef ConjugateGradient<SparseMatrix<double>, Lower|Upper> RbfSolver;
-
+//typedef BiCGSTAB<SparseMatrix<double>, DiagonalPreconditioner<double>> RbfSolver;
+//typedef BiCGSTAB<SparseMatrix<double>, IncompleteLUT<double,int>> RbfSolver;
+//typedef ConjugateGradient<SparseMatrix<double>, Lower|Upper, DiagonalPreconditioner<double>> RbfSolver;
+//typedef ConjugateGradient<SparseMatrix<double>, Lower|Upper, IncompleteLUT<double,int>> RbfSolver;
 
 /**************************************************************
  * RBF interpolation using nearest neighbor search
@@ -293,72 +291,87 @@ void rbf_solve(RbfSolver& solver, const VectorXd& F, VectorXd& C) {
 
     C = solver.solve(F);
 
+#if 0
+    std::cout << "----------------------------------" << std::endl;
+    std::cout << "numb iterations: " << solver.iterations() << std::endl;
+    std::cout << "estimated error: " << solver.error()      << std::endl;
+    std::cout << "----------------------------------" << std::endl;
+#endif
+
     auto stop = chrono::high_resolution_clock::now();
     auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
     std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
 }
 
-/*****************
- * Test
- *****************/
+/**************************
+ * Global data namespace
+ **************************/
+namespace GlobalData {
 
-int main(int argc, char** argv) {
+    int numClusters;
+    int mpi_rank;
+    
+    //source points and fields, and target points
+    MatrixXd* points_p;
+    MatrixXd* fields_p;
+    MatrixXd* target_points_p;
 
-    // Initialize MPI
-    int nprocs, rank;
-    MPI_Init(&argc, &argv);
-    MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    //matrices for storing interpolated points and fields at targets
+    //This is needed because order of points is changed after interpolation.
+    //May need to maintain same order in the future.
+    MatrixXd* interp_target_points_p;
+    MatrixXd* interp_target_fields_p;
 
-    //
-    // Test parameters
-    //
-    const int g_numPoints = 200000;
+    //cluster sizes for source and target points
+    VectorXi clusterSizes;
+    VectorXi target_clusterSizes;
+
+    //parameters
+    const int g_numPoints = 2000;
     const int g_numTargetPoints = 4;
     const int numNeighbors = 8;
     const int numFields = 1;
-
     const bool use_cutoff_radius = false;
     const double cutoff_radius = 0.5;
-    
-    if(rank == 0) {
-        std::cout << "===== Parameters ====" << std::endl
-                  << "numPoints: " << g_numPoints << std::endl
-                  << "numTargetPoints: " << g_numTargetPoints << std::endl
-                  << "numNeighbors: " << numNeighbors << std::endl
-                  << "numFields: " << numFields << std::endl
-                  << "use_cutoff_radius: " << (use_cutoff_radius ? "true" : "false") << std::endl
-                  << "cutoff_radius: " << cutoff_radius << std::endl
-                  << "=====================" << std::endl;
+
+    //initialize global params
+    void init(int nc, int r) {
+        numClusters = nc;
+        mpi_rank = r;
+        points_p = nullptr;
+        fields_p = nullptr;
+        target_points_p = nullptr;
+        interp_target_points_p = nullptr;
+        interp_target_fields_p = nullptr;
+        clusterSizes.resize(numClusters);
+        target_clusterSizes.resize(numClusters);
+
+        if(mpi_rank == 0) {
+            std::cout << "===== Parameters ====" << std::endl
+                      << "numPoints: " << g_numPoints << std::endl
+                      << "numTargetPoints: " << g_numTargetPoints << std::endl
+                      << "numNeighbors: " << numNeighbors << std::endl
+                      << "numFields: " << numFields << std::endl
+                      << "use_cutoff_radius: " << (use_cutoff_radius ? "true" : "false") << std::endl
+                      << "cutoff_radius: " << cutoff_radius << std::endl
+                      << "=====================" << std::endl;
+        }
     }
-
     //
-    // points, fields and target points all set by rank 0
+    // Read and partition data on master node. Assumes node is big enough
+    // to store and process the data. Currently it generates random data.
     //
-    MatrixXd* points_p = nullptr;
-    MatrixXd* fields_p = nullptr;
-    MatrixXd* target_points_p = nullptr;
-
-    // divide point cloud into nprocs clusters
-    const int numClusters = nprocs;
-    VectorXi clusterSizes(numClusters);
-    VectorXi target_clusterSizes(numClusters);
-
-    /*****************************
-     * Cluster and decompose data
-     *****************************/
-    if(rank == 0)
-    {
-        const int numPoints = g_numPoints;
-        const int numTargetPoints = g_numTargetPoints;
-
+    void read_and_partition_data() {
         // coordinates and fields to interpolate
+        int numPoints = g_numPoints;
+        int numTargetPoints = g_numTargetPoints;
+        
         MatrixXd points(3,numPoints);
         MatrixXd fields(numFields,numPoints);
-
+        
         VectorXi clusterAssignments(numPoints);
         MatrixXd clusterCenters(3,numClusters);
-
+        
         // Generate a set of random 3D points and associated field values
         for (int i = 0; i < numPoints; i++) {
             points(0, i) = rand() / (double)RAND_MAX;
@@ -372,7 +385,7 @@ int main(int argc, char** argv) {
                 fields(j, i) = x * y * z * (j + 1); //rand() / (double)RAND_MAX;
             }
         }
-
+        
         // Initialize the target points
         MatrixXd target_points(3, numTargetPoints);
         VectorXi target_clusterAssignments(numTargetPoints);
@@ -390,17 +403,17 @@ int main(int argc, char** argv) {
             target_points(2, i) = rand() / (double)RAND_MAX;
             //*/
         }
-
+        
         // Partition the points into N clusters using k-means clustering
         kMeansClustering(points, numPoints, numClusters,
                 clusterAssignments, clusterSizes, clusterCenters);
-
+        
         // Sort points and fields
         points_p = new MatrixXd(3, numPoints);
         fields_p = new MatrixXd(numFields, numPoints);
         MatrixXd& sorted_points = *points_p;
         MatrixXd& sorted_fields = *fields_p;
-
+        
         int idx = 0;
         for (int i = 0; i < numClusters; i++) {
             for(int j = 0; j < numPoints; j++) {
@@ -414,7 +427,7 @@ int main(int argc, char** argv) {
                 idx++;
             }
         }
-
+        
         // Partition target points
         target_clusterSizes.setZero(numClusters);
         for(int i = 0; i < numTargetPoints; i++) {
@@ -433,11 +446,11 @@ int main(int argc, char** argv) {
             target_clusterAssignments(i) = closestCluster;
             target_clusterSizes(closestCluster)++;
         }
-
+        
         // Sort target points
         target_points_p = new MatrixXd(3, numTargetPoints);
         MatrixXd& sorted_target_points = *target_points_p;
-
+        
         idx = 0;
         for (int i = 0; i < numClusters; i++) {
             for(int j = 0; j < numTargetPoints; j++) {
@@ -449,186 +462,246 @@ int main(int argc, char** argv) {
                 idx++;
             }
         }
-
     }
+};
 
-    /*****************************
-     * Scatter data
-     *****************************/
+/*************************************
+ * Cluster data structure.
+ ************************************/
+struct ClusterData {
 
-    // Get the local points and fields assigned to this rank
     int numPoints;
-    MPI_Scatter(clusterSizes.data(), 1, MPI_INT,
-            &numPoints, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-    MatrixXd points(3, numPoints);
-    MatrixXd fields(numFields, numPoints);
-    VectorXi offsets(numClusters);
-    VectorXi counts(numClusters);
-
-    //scatter points
-    if(rank == 0) {
-        int offset = 0;
-        for(int i = 0; i < numClusters; i++) {
-            offsets(i) = offset;
-            counts(i) = clusterSizes(i) * 3;
-            offset += counts(i);
-        }
-    }
-    MPI_Scatterv(points_p ? points_p->data() : nullptr, counts.data(), offsets.data(), MPI_DOUBLE,
-            points.data(), numPoints * 3, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
-    //scatter fields
-    if(rank == 0) {
-        int offset = 0;
-        for(int i = 0; i < numClusters; i++) {
-            offsets(i) = offset;
-            counts(i) = clusterSizes(i) * numFields;
-            offset += counts(i);
-        }
-    }
-    MPI_Scatterv(fields_p ? fields_p->data() : nullptr, counts.data(), offsets.data(), MPI_DOUBLE,
-            fields.data(), numPoints * numFields, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
-    //Get local target points assinged to this rank
     int numTargetPoints;
-    MPI_Scatter(target_clusterSizes.data(), 1, MPI_INT,
-            &numTargetPoints, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-    MatrixXd target_points(3, numTargetPoints);
-    MatrixXd target_fields(numFields, numTargetPoints);
-
-    //Scatter target points
-    if(rank == 0) {
-        int offset = 0;
-        for(int i = 0; i < numClusters; i++) {
-            offsets(i) = offset;
-            counts(i) = target_clusterSizes(i) * 3;
-            offset += counts(i);
-        }
-    }
-
-    MPI_Scatterv(target_points_p ? target_points_p->data() : nullptr, counts.data(), offsets.data(), MPI_DOUBLE,
-            target_points.data(), numTargetPoints * 3, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
-
-    /*********************************************
-     * Build KD tree for nearest neighbor search
-     *********************************************/
-    PointCloud cloud(points, numPoints);
-    KDTree index(3, cloud, nanoflann::KDTreeSingleIndexAdaptorParams());
-    index.buildIndex();
-
-    /*********************************************
-     * Build interpolation matrix and decompose it
-     *********************************************/
-    SparseMatrix<double> A(numPoints, numPoints);
+    MatrixXd points;
+    MatrixXd fields;
+    MatrixXd target_points;
+    MatrixXd target_fields;
+    PointCloud* cloud;
+    KDTree* ptree;
+    SparseMatrix<double> A;
     RbfSolver solver;
-    VectorXd F(numPoints);
-    VectorXd C(numPoints);
+    
+    //
+    // Scatter data to slave processors
+    //
+    void scatter() {
+        using namespace GlobalData;
 
-    if(use_cutoff_radius)
-        rbf_build_symm(index, points, numPoints, numNeighbors, cutoff_radius, solver, A);
-    else
-        rbf_build(index, points, numPoints, numNeighbors, solver, A);
+        // scatter number of points
+        MPI_Scatter(clusterSizes.data(), 1, MPI_INT,
+                &numPoints, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    /*****************************
-     * Interpolate target fields
-     *****************************/
-    target_fields.setZero();
+        //allocate space for points and fields
+        points.resize(3, numPoints);
+        fields.resize(numFields, numPoints);
 
-    for(int f = 0; f < numFields; f++) {
+        //offsets and coutns
+        VectorXi offsets(numClusters);
+        VectorXi counts(numClusters);
 
-        std::cout << "==== Interpolating field " << f << " ====" << std::endl;
-
-        //solve weights for this field
-        F = fields.row(f);
-        rbf_solve(solver, F, C);
-
-        //interpolate for target fields
-        if(use_cutoff_radius) {
-            VectorXd query(3);
-            std::vector<nanoflann::ResultItem<unsigned, double>> matches;
-            for (int i = 0; i < numTargetPoints; i++) {
-                // Perform a radius search
-                query = target_points.col(i);
-                unsigned nMatches = knn_radius(index, cutoff_radius, query.data(), matches);
-
-                // interpolate
-                for (int k = 0; k < nMatches; k++) {
-                    int j = matches[k].first;
-                    double r = rbf(sqrt(matches[k].second));
-                    target_fields(f, i) += C(j) * r;
-                }
-            }
-        } else {
-            VectorXd query(3);
-            vector<size_t> indices(numNeighbors);
-            vector<double> distances(numNeighbors);
-            for (int i = 0; i < numTargetPoints; i++) {
-                // Perform the k-nearest neighbor search
-                query = target_points.col(i);
-                knn(index, numNeighbors, query.data(), &indices[0], &distances[0]);
-
-                // interpolate
-                for (int k = 0; k < numNeighbors; k++) {
-                    int j = indices[k];
-                    double r = rbf(sqrt(distances[k]));
-                    target_fields(f, i) += C(j) * r;
-                }
+        //scatter points
+        if(mpi_rank == 0) {
+            int offset = 0;
+            for(int i = 0; i < numClusters; i++) {
+                offsets(i) = offset;
+                counts(i) = clusterSizes(i) * 3;
+                offset += counts(i);
             }
         }
+        MPI_Scatterv(points_p ? points_p->data() : nullptr, counts.data(), offsets.data(), MPI_DOUBLE,
+                points.data(), numPoints * 3, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+        //scatter fields
+        if(mpi_rank == 0) {
+            int offset = 0;
+            for(int i = 0; i < numClusters; i++) {
+                offsets(i) = offset;
+                counts(i) = clusterSizes(i) * numFields;
+                offset += counts(i);
+            }
+        }
+        MPI_Scatterv(fields_p ? fields_p->data() : nullptr, counts.data(), offsets.data(), MPI_DOUBLE,
+                fields.data(), numPoints * numFields, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+        //Get local target points assinged to this mpi_rank
+        MPI_Scatter(target_clusterSizes.data(), 1, MPI_INT,
+                &numTargetPoints, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+        target_points.resize(3, numTargetPoints);
+        target_fields.resize(numFields, numTargetPoints);
+
+        //Scatter target points
+        if(mpi_rank == 0) {
+            int offset = 0;
+            for(int i = 0; i < numClusters; i++) {
+                offsets(i) = offset;
+                counts(i) = target_clusterSizes(i) * 3;
+                offset += counts(i);
+            }
+        }
+
+        MPI_Scatterv(target_points_p ? target_points_p->data() : nullptr, counts.data(), offsets.data(), MPI_DOUBLE,
+                target_points.data(), numTargetPoints * 3, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+            
     }
+    //
+    // Gather data from slave processors
+    //
+    void gather() {
+        using namespace GlobalData;
 
-    /*****************************
-     * Gather target points & fields
-     *****************************/
+        //offsets and coutns
+        VectorXi offsets(numClusters);
+        VectorXi counts(numClusters);
+    
+        //Gather target points
+        interp_target_points_p = nullptr;
+        if(mpi_rank == 0)
+            interp_target_points_p = new MatrixXd(3, g_numTargetPoints);
+    
+        if(mpi_rank == 0) {
+            int offset = 0;
+            for(int i = 0; i < numClusters; i++) {
+                offsets(i) = offset;
+                counts(i) = target_clusterSizes(i) * 3;
+                offset += counts(i);
+            }
+        }
+        MPI_Gatherv(target_points.data(), numTargetPoints * 3, MPI_DOUBLE,
+                interp_target_points_p ? interp_target_points_p->data() : nullptr, counts.data(), offsets.data(),
+                MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    
+        //Gather interpolated fields
+        interp_target_fields_p = nullptr;
+        if(mpi_rank == 0)
+            interp_target_fields_p = new MatrixXd(numFields, g_numTargetPoints);
+    
+        if(mpi_rank == 0) {
+            int offset = 0;
+            for(int i = 0; i < numClusters; i++) {
+                offsets(i) = offset;
+                counts(i) = target_clusterSizes(i) * numFields;
+                offset += counts(i);
+            }
+        }
+        MPI_Gatherv(target_fields.data(), numTargetPoints * numFields, MPI_DOUBLE,
+                interp_target_fields_p ? interp_target_fields_p->data() : nullptr, counts.data(), offsets.data(),
+                MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-    //Gather target points
-    MatrixXd* all_target_points = nullptr;
-    if(rank == 0)
-        all_target_points = new MatrixXd(3, g_numTargetPoints);
-
-    if(rank == 0) {
-        int offset = 0;
-        for(int i = 0; i < numClusters; i++) {
-            offsets(i) = offset;
-            counts(i) = target_clusterSizes(i) * 3;
-            offset += counts(i);
+        // print interpolated fields with associated coordinates
+        // Note that the order of points is changed.
+        if(mpi_rank == 0) {
+            std::cout << "===================" << std::endl;
+            std::cout << interp_target_points_p->transpose() << std::endl;
+            std::cout << "===================" << std::endl;
+            std::cout << interp_target_fields_p->transpose() << std::endl;
         }
     }
-    MPI_Gatherv(target_points.data(), numTargetPoints * 3, MPI_DOUBLE,
-            all_target_points ? all_target_points->data() : nullptr, counts.data(), offsets.data(),
-            MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    //
+    // Build KD tree needed for fast nearest neighbor search
+    //
+    void build_kdtree() {
+        cloud = new PointCloud(points, numPoints);
+        ptree = new KDTree(3, *cloud, nanoflann::KDTreeSingleIndexAdaptorParams());
+        ptree->buildIndex();
+    }
+    //
+    // Build sparse RBF interpolation matrix using either k nearest neigbors
+    // or cutoff radius criteria
+    //
+    void build_rbf() {
+        using namespace GlobalData;
+        A.resize(numPoints, numPoints);
+        if(use_cutoff_radius)
+            rbf_build_symm(*ptree, points, numPoints, numNeighbors, cutoff_radius, solver, A);
+        else
+            rbf_build(*ptree, points, numPoints, numNeighbors, solver, A);
+    }
+    //
+    // Interpolate for each field
+    //
+    void solve_rbf() {
+        using namespace GlobalData;
+        VectorXd F(numPoints);
+        VectorXd C(numPoints);
 
-    //Gather interpolated fields
-    MatrixXd* all_target_fields = nullptr;
-    if(rank == 0)
-        all_target_fields = new MatrixXd(numFields, g_numTargetPoints);
+        target_fields.setZero();
 
-    if(rank == 0) {
-        int offset = 0;
-        for(int i = 0; i < numClusters; i++) {
-            offsets(i) = offset;
-            counts(i) = target_clusterSizes(i) * numFields;
-            offset += counts(i);
+        for(int f = 0; f < numFields; f++) {
+
+            std::cout << "==== Interpolating field " << f << " ====" << std::endl;
+
+            //solve weights for this field
+            F = fields.row(f);
+            rbf_solve(solver, F, C);
+
+            //interpolate for target fields
+            if(use_cutoff_radius) {
+                VectorXd query(3);
+                std::vector<nanoflann::ResultItem<unsigned, double>> matches;
+                for (int i = 0; i < numTargetPoints; i++) {
+                    // Perform a radius search
+                    query = target_points.col(i);
+                    unsigned nMatches = knn_radius(*ptree, cutoff_radius, query.data(), matches);
+
+                    // interpolate
+                    for (int k = 0; k < nMatches; k++) {
+                        int j = matches[k].first;
+                        double r = rbf(sqrt(matches[k].second));
+                        target_fields(f, i) += C(j) * r;
+                    }
+                }
+            } else {
+                VectorXd query(3);
+                vector<size_t> indices(numNeighbors);
+                vector<double> distances(numNeighbors);
+                for (int i = 0; i < numTargetPoints; i++) {
+                    // Perform the k-nearest neighbor search
+                    query = target_points.col(i);
+                    knn(*ptree, numNeighbors, query.data(), &indices[0], &distances[0]);
+
+                    // interpolate
+                    for (int k = 0; k < numNeighbors; k++) {
+                        int j = indices[k];
+                        double r = rbf(sqrt(distances[k]));
+                        target_fields(f, i) += C(j) * r;
+                    }
+                }
+            }
         }
     }
-    MPI_Gatherv(target_fields.data(), numTargetPoints * numFields, MPI_DOUBLE,
-            all_target_fields ? all_target_fields->data() : nullptr, counts.data(), offsets.data(),
-            MPI_DOUBLE, 0, MPI_COMM_WORLD);
+};
 
-    /*****************************
-     * Finalize
-     *****************************/
+/*****************
+ * Test driver
+ *****************/
 
-    //print
-    if(rank == 0) {
-        std::cout << "===================" << std::endl;
-        std::cout << all_target_points->transpose() << std::endl;
-        std::cout << "===================" << std::endl;
-        std::cout << all_target_fields->transpose() << std::endl;
-    }
+int main(int argc, char** argv) {
+
+    // Initialize MPI
+    int nprocs, mpi_rank;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
+    MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+
+    //
+    // Cluster and decompose data
+    //
+
+    GlobalData::init(nprocs, mpi_rank);
+    if(mpi_rank == 0)
+        GlobalData::read_and_partition_data();
+
+    //
+    // Each rank gets one cluster that it solves
+    // independently of other ranks
+    //
+    ClusterData data;
+    data.scatter();
+    data.build_kdtree();
+    data.build_rbf();
+    data.solve_rbf();
+    data.gather();
 
     // Finalize MPI
     MPI_Finalize();
