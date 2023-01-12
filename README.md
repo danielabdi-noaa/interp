@@ -9,40 +9,60 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
 ## Build
     ./build.sh
 ## Run
+    $ mpirun -n 4 ./interp
+
     ===== Parameters ====
     numPoints: 200000
     numTargetPoints: 4
     numNeighbors: 8
     numFields: 1
+    use_cutoff_radius: false
+    cutoff_radius: 0.5
     =====================
-    Clustering point clouds into 2 clusters
-    cluster 0 with centroid (0.497855 0.496606 0.749471) and 100103 points
-    cluster 1 with centroid (0.501046 0.504052 0.250395) and 99897 points
-    Finished in 44 millisecs.
+    Clustering point clouds into 4 clusters
+    cluster 0 with centroid (0.732482  0.77461 0.529731) and 50295 points
+    cluster 1 with centroid (0.737033 0.228173  0.47419) and 49705 points
+    cluster 2 with centroid (0.266575 0.527163 0.226509) and 50166 points
+    cluster 3 with centroid (0.261717 0.467934 0.771812) and 49834 points
+    Finished in 323 millisecs.
     Constructing interpolation matrix ...
     Constructing interpolation matrix ...
-    Finished in 143 millisecs.
+    Constructing interpolation matrix ...
+    Constructing interpolation matrix ...
+    Finished in 66 millisecs.
     Started factorization ...
-    Finished in 145 millisecs.
+    Finished in 66 millisecs.
     Started factorization ...
-    Finished in 29491 millisecs.
+    Finished in 67 millisecs.
+    Started factorization ...
+    Finished in 68 millisecs.
+    Started factorization ...
+    Finished in 7579 millisecs.
     ==== Interpolating field 0 ====
     Started solve ...
-    Finished in 29561 millisecs.
+    Finished in 46 millisecs.
+    Finished in 7775 millisecs.
     ==== Interpolating field 0 ====
     Started solve ...
-    Finished in 108 millisecs.
-    Finished in 101 millisecs.
+    Finished in 7798 millisecs.
+    ==== Interpolating field 0 ====
+    Started solve ...
+    Finished in 43 millisecs.
+    Finished in 42 millisecs.
+    Finished in 8134 millisecs.
+    ==== Interpolating field 0 ====
+    Started solve ...
+    Finished in 37 millisecs.
     ===================
     0.840188 0.394383 0.783099
-    0.364784 0.513401  0.95223
     0.911647 0.197551 0.335223
     0.277775  0.55397 0.477397
+    0.364784 0.513401  0.95223
     ===================
-    0.259484
-    0.178334
+     0.259484
     0.0603727
     0.0734613
+     0.178334
 
 # To do
 

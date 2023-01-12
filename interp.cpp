@@ -26,7 +26,7 @@ class PointCloud {
     public:
         PointCloud(MatrixXd& pc, size_t np) :
             point_cloud(pc), num_points(np) {
-            }
+        }
 
         /*functions needed by nanoflann*/
         inline size_t kdtree_get_point_count() const { return num_points; }
@@ -327,6 +327,8 @@ int main(int argc, char** argv) {
                   << "numTargetPoints: " << g_numTargetPoints << std::endl
                   << "numNeighbors: " << numNeighbors << std::endl
                   << "numFields: " << numFields << std::endl
+                  << "use_cutoff_radius: " << (use_cutoff_radius ? "true" : "false") << std::endl
+                  << "cutoff_radius: " << cutoff_radius << std::endl
                   << "=====================" << std::endl;
     }
 
