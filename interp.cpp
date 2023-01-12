@@ -59,15 +59,19 @@ unsigned int knn_radius(const KDTree& index, double radius, double* query,
     return index.radiusSearch(query, radius * radius, matches, nanoflann::SearchParameters());
 }
 
-/*****************
- * Clustering
- *****************/
+/********************************************************************
+ * Clustering using k-means (Lloyd's algorithm).
+ * Easy to implement and not that critical, so lets do it ourselves.
+ ********************************************************************/
 
 //
 // Function for partitioning a set of 3D points into N clusters using the k-means clustering algorithm
 //
 void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
         VectorXi& clusterAssignments, VectorXi& clusterSizes, MatrixXd& clusterCenters) {
+
+    std::cout << "Clustering point clouds into " << numClusters << " clusters" << std::endl;
+    auto start = chrono::high_resolution_clock::now();
 
     // Initialize the cluster centers
     for (int i = 0; i < numClusters; i++) {
@@ -77,11 +81,11 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
     }
 
     // Perform k-means clustering until the cluster assignments stop changing
-    MatrixXd newClusterCenters(3, numClusters);
+    MatrixXd sumClusterCenters(3, numClusters);
 
-    unsigned int iter = 0;
     bool converged = false;
     while (!converged) {
+
         // Update the cluster assignments
         converged = true;
         for (int i = 0; i < numPoints; i++) {
@@ -104,35 +108,40 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
         }
 
         // Update the cluster centers
-        newClusterCenters.setZero(3,numClusters);
+        sumClusterCenters.setZero(3,numClusters);
         clusterSizes.setZero(numClusters);
 
         for (int i = 0; i < numPoints; i++) {
             int cluster = clusterAssignments(i);
-            newClusterCenters(0,cluster) += points(0,i);
-            newClusterCenters(1,cluster) += points(1,i);
-            newClusterCenters(2,cluster) += points(2,i);
+            sumClusterCenters(0,cluster) += points(0,i);
+            sumClusterCenters(1,cluster) += points(1,i);
+            sumClusterCenters(2,cluster) += points(2,i);
             clusterSizes(cluster)++;
         }
         for (int i = 0; i < numClusters; i++) {
             if (clusterSizes(i) > 0) {
-                clusterCenters(0,i) = newClusterCenters(0,i) / clusterSizes(i);
-                clusterCenters(1,i) = newClusterCenters(1,i) / clusterSizes(i);
-                clusterCenters(2,i) = newClusterCenters(2,i) / clusterSizes(i);
+                clusterCenters(0,i) = sumClusterCenters(0,i) / clusterSizes(i);
+                clusterCenters(1,i) = sumClusterCenters(1,i) / clusterSizes(i);
+                clusterCenters(2,i) = sumClusterCenters(2,i) / clusterSizes(i);
             }
         }
-        iter++;
     }
-    //final cluster sizes
-    std::cout << "Cluster sizes" << std::endl;
+
+    //Print final cluster sizes
     for (int i = 0; i < numClusters; i++) {
-        std::cout << "[" << i << "] " << clusterSizes(i) << std::endl;
+        std::cout << "cluster " << i << " with centroid ("
+                  << clusterCenters.col(i).transpose() << ") and "
+                  << clusterSizes(i) << " points" << std::endl;
     }
+
+    auto stop = chrono::high_resolution_clock::now();
+    auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
+    std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
 }
 
-/*****************
- * RBF interpolation
- *****************/
+/**************************************************************
+ * RBF interpolation using Eigen for solving the Ax=B equation
+ **************************************************************/
 
 //
 // Settings for direct and iterative solvers
@@ -189,7 +198,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X, const int numPoints, cons
 
   auto stop = chrono::high_resolution_clock::now();
   auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-  std::cout << "Finished in " << duration.count() << " milli secs." << std::endl;
+  std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
 
   //
   // LU decomposition of the interpolation matrix
@@ -206,7 +215,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X, const int numPoints, cons
 
   stop = chrono::high_resolution_clock::now();
   duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-  std::cout << "Finished in " << duration.count() << " milli secs." << std::endl;
+  std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
 }
 
 //
@@ -248,7 +257,7 @@ void rbf_build_symm(const KDTree& index, const MatrixXd& X, const int numPoints,
 
   auto stop = chrono::high_resolution_clock::now();
   auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-  std::cout << "Finished in " << duration.count() << " milli secs." << std::endl;
+  std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
 
   //
   // LU decomposition of the interpolation matrix
@@ -265,7 +274,7 @@ void rbf_build_symm(const KDTree& index, const MatrixXd& X, const int numPoints,
   
   stop = chrono::high_resolution_clock::now();
   duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-  std::cout << "Finished in " << duration.count() << " milli secs." << std::endl;
+  std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
 }
 
 //
@@ -280,7 +289,7 @@ void rbf_solve(RbfSolver& solver, const VectorXd& F, VectorXd& C) {
 
   auto stop = chrono::high_resolution_clock::now();
   auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-  std::cout << "Finished in " << duration.count() << " milli secs." << std::endl;
+  std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
 }
 
 /*****************
@@ -298,20 +307,23 @@ int main(int argc, char** argv) {
     //
     // Test parameters
     //
-    const int g_numPoints = 20; //200000; //1000000;
-    const int g_numTargetPoints = 4; //100000 
+    const int g_numPoints = 2000;
+    const int g_numTargetPoints = 4;
     const int numNeighbors = 8;
     const int numFields = 1;
+
+    const bool use_cutoff_radius = false;
     const double cutoff_radius = 0.5;
-    const bool use_cutoff_radius = true;
 
-    // Cluster and decompose on rank 0
-    const int numClusters = nprocs;
-
+    //
+    // points, fields and target points all set by rank 0
+    //
     MatrixXd* points_p = nullptr;
     MatrixXd* fields_p = nullptr;
     MatrixXd* target_points_p = nullptr;
 
+    // divide point cloud into nprocs clusters
+    const int numClusters = nprocs;
     VectorXi clusterSizes(numClusters);
     VectorXi target_clusterSizes(numClusters);
 
