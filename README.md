@@ -67,7 +67,7 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
 # To do
 
 - [ ] Add regularization to high-order RBF interpolation
-- [ ] Process multiple clusters per mpi rank to increase usability of direct solvers
+- [X] Process multiple clusters per mpi rank to increase usability of direct solvers
 - [ ] Make iterative solvers CG and BiCGstab robust
 - [ ] Add NetCDF/HDF5 reading/writing capability for input/output resp
 - [ ] Add max iterations or tolerance stopping for iterative solvers

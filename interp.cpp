@@ -331,6 +331,7 @@ namespace GlobalData {
     const int g_numTargetPoints = 4;
     const int numNeighbors = 8;
     const int numFields = 1;
+    const int numClustersPerRank = 1;
     const bool use_cutoff_radius = false;
     const double cutoff_radius = 0.5;
 
@@ -352,6 +353,7 @@ namespace GlobalData {
                       << "numTargetPoints: " << g_numTargetPoints << std::endl
                       << "numNeighbors: " << numNeighbors << std::endl
                       << "numFields: " << numFields << std::endl
+                      << "numClustersPerRank: " << numClustersPerRank << std::endl
                       << "use_cutoff_radius: " << (use_cutoff_radius ? "true" : "false") << std::endl
                       << "cutoff_radius: " << cutoff_radius << std::endl
                       << "=====================" << std::endl;
@@ -670,7 +672,122 @@ struct ClusterData {
             }
         }
     }
+    //
+    // Conveneince function to build and solve rbf interpolation
+    //
+    void build_and_solve() {
+        build_kdtree();
+        build_rbf();
+        solve_rbf();
+    }
 };
+
+//
+// Split ClusterData into multiple partitions to be processed by threads.
+// Its main advantage is however to help direct solvers that scale with O(n^3).
+// Splitting cluster into 2, helps by 8x times more for dense matrices, so even if
+// one thread processes all sub-clusters, it is still very helpful given cluster
+// size does not compromise interpolation at boundaries by a lot. 
+//
+void split_cluster(const ClusterData& parent, int numClusters,
+                   ClusterData* subclusters, VectorXi& target_clusterAssignments
+) {
+    using GlobalData::numFields;
+
+    MatrixXd clusterCenters(3,numClusters);
+
+    VectorXi clusterAssignments(parent.numPoints);
+    VectorXi clusterSizes;
+    VectorXi target_clusterSizes;
+       
+    // Create sub clusters
+    kMeansClustering(parent.points, parent.numPoints, numClusters,
+            clusterAssignments, clusterSizes, clusterCenters);
+    
+    // Initialize subcluster source points & fields
+    for(int i = 0; i < numClusters; i++) {
+        ClusterData& cd = subclusters[i];
+        cd.numPoints = clusterSizes(i);
+        cd.points.resize(3, cd.numPoints);
+        cd.fields.resize(numFields, cd.numPoints);
+    }
+
+    // Populate source point and fields of subclusters
+    std::vector<int> cidx(numClusters, 0);
+    for(int i = 0; i < parent.numPoints; i++) {
+        int owner = clusterAssignments(i);
+        int idx = cidx[owner];
+
+        ClusterData& cd = subclusters[owner];
+        cd.points(0,idx) = parent.points(0,i);
+        cd.points(1,idx) = parent.points(1,i);
+        cd.points(2,idx) = parent.points(2,i);
+        for(int f = 0; f < numFields; f++)
+            cd.fields(f,idx) = parent.fields(f,i);
+        cidx[owner]++;
+    }
+
+    // Partition target points
+    target_clusterSizes.setZero(numClusters);
+    for(int i = 0; i < parent.numTargetPoints; i++) {
+        int closestCluster = -1;
+        double minDistance = std::numeric_limits<double>::max();
+        for (int j = 0; j < numClusters; j++) {
+            double dx = parent.target_points(0, i) - clusterCenters(0, j);
+            double dy = parent.target_points(1, i) - clusterCenters(1, j);
+            double dz = parent.target_points(2, i) - clusterCenters(2, j);
+            double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (distance < minDistance) {
+                minDistance = distance;
+                closestCluster = j;
+            }
+        }
+        target_clusterAssignments(i) = closestCluster;
+        target_clusterSizes(closestCluster)++;
+    }
+
+    // Initialize subcluster target points & fields
+    for(int i = 0; i < numClusters; i++) {
+        ClusterData& cd = subclusters[i];
+        cd.numTargetPoints = target_clusterSizes(i);
+        cd.target_points.resize(3, cd.numTargetPoints);
+        cd.target_fields.resize(numFields, cd.numTargetPoints);
+    }
+
+    // Populate target points of subclusters
+    std::vector<int> target_cidx(numClusters, 0);
+    for(int i = 0; i < parent.numTargetPoints; i++) {
+        int owner = target_clusterAssignments(i);
+        int idx = target_cidx[owner];
+
+        ClusterData& cd = subclusters[owner];
+        cd.target_points(0,idx) = parent.target_points(0,i);
+        cd.target_points(1,idx) = parent.target_points(1,i);
+        cd.target_points(2,idx) = parent.target_points(2,i);
+        target_cidx[owner]++;
+    }
+}
+
+//
+// Merge subcluster interpolation result back into parent cluster
+// We only need to update the target fields.
+//
+void merge_cluster(ClusterData& parent, int numClusters,
+                   const ClusterData* subclusters, const VectorXi& target_clusterAssignments
+) {
+    using GlobalData::numFields;
+
+    std::vector<int> target_cidx(numClusters, 0);
+    for(int i = 0; i < parent.numTargetPoints; i++) {
+        int owner = target_clusterAssignments(i);
+        int idx = target_cidx[owner];
+
+        const ClusterData& cd = subclusters[owner];
+        for(int f = 0; f < numFields; f++)
+            parent.target_fields(f,i) = cd.fields(f,idx);
+        target_cidx[owner]++;
+    } 
+}
 
 /*****************
  * Test driver
@@ -693,17 +810,48 @@ int main(int argc, char** argv) {
         GlobalData::read_and_partition_data();
 
     //
-    // Each rank gets one cluster that it solves
-    // independently of other ranks
+    // Each rank gets one cluster that it solves independently of other ranks
+    // It may choose to "divide and conquer" the cluster for the sake of
+    // direct solvers. Decide if to use threading here or linear equation solvers?
     //
-    ClusterData data;
-    data.scatter();
-    data.build_kdtree();
-    data.build_rbf();
-    data.solve_rbf();
-    data.gather();
 
+    ClusterData parent_cluster;
+
+    // scatter data to slave nodes
+    parent_cluster.scatter();
+
+    // build and solve rbf interpolation
+    using GlobalData::numClustersPerRank;
+
+    if(numClustersPerRank <= 1)
+    {
+        parent_cluster.build_and_solve();
+    }
+    else
+    {
+        ClusterData child_clusters[numClustersPerRank];
+        VectorXi target_clusterAssignments(parent_cluster.numTargetPoints);
+
+        //split cluster
+        split_cluster(parent_cluster, numClustersPerRank,
+                      child_clusters, target_clusterAssignments);
+
+        //solve mini-clusters independently
+        for(int i = 0; i < numClustersPerRank; i++)
+            child_clusters[i].build_and_solve();
+
+        //merge clusters
+        merge_cluster(parent_cluster, numClustersPerRank,
+                      child_clusters, target_clusterAssignments);
+    }
+
+    // Gather result from slave nodes
+    parent_cluster.gather();
+
+    //
     // Finalize MPI
+    //
+
     MPI_Finalize();
 
     return 0;
