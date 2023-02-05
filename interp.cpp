@@ -14,6 +14,7 @@ using namespace Eigen;
 
 constexpr int numDims = 2;
 constexpr double epsilon = 3;
+constexpr double matrix_epsilon = 1e-5;
 
 /***************************************************
  * Nearest neighbor search using nanoflann library
@@ -201,7 +202,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
             for (int k = 0; k < nMatches; k++) {
                 int j = matches[k].first;
                 double r = rbf(sqrt(matches[k].second));
-                if(fabs(r) > 1e-4)
+                if(fabs(r) > matrix_epsilon)
                     tripletList.push_back(T(i,j,r));
             }
         }
@@ -218,7 +219,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
             for (int k = 0; k < numNeighbors; k++) {
                 int j = indices[k];
                 double r = rbf(sqrt(distances[k]));
-                if(fabs(r) > 1e-4)
+                if(fabs(r) > matrix_epsilon)
                     tripletList.push_back(T(i,j,r));
             }
         }
