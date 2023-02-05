@@ -13,8 +13,10 @@ using namespace std;
 using namespace Eigen;
 
 constexpr int numDims = 2;
-constexpr double epsilon = 3;
 constexpr double matrix_epsilon = 1e-5;
+
+constexpr double rbf_shape = 12;  // approximatly = 0.8 / avg_distance_between_nodes)
+constexpr double rbf_smoothing = 0.01;
 
 /***************************************************
  * Nearest neighbor search using nanoflann library
@@ -157,13 +159,13 @@ typedef SparseLU<SparseMatrix<double>> RbfSolver;
 // Radial basis function
 //
 double rbf(double r) {
-    double fact = epsilon * epsilon * r * r;
+    double fact = rbf_shape * rbf_shape * r * r;
 #if 1
     // gaussian
     return exp(-fact);
 #else
     // compact support gaussian bump
-    if(r < 1.0 / epsilon)
+    if(r < 1.0 / rbf_shape)
        return exp(-1 / (1 - fact));
     else
        return 0;
@@ -202,6 +204,8 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
             for (int k = 0; k < nMatches; k++) {
                 int j = matches[k].first;
                 double r = rbf(sqrt(matches[k].second));
+                if(i == j)
+                    r += rbf_smoothing;
                 if(fabs(r) > matrix_epsilon)
                     tripletList.push_back(T(i,j,r));
             }
@@ -219,6 +223,8 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
             for (int k = 0; k < numNeighbors; k++) {
                 int j = indices[k];
                 double r = rbf(sqrt(distances[k]));
+                if(i == j)
+                    r += rbf_smoothing;
                 if(fabs(r) > matrix_epsilon)
                     tripletList.push_back(T(i,j,r));
             }
