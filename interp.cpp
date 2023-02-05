@@ -13,6 +13,7 @@ using namespace std;
 using namespace Eigen;
 
 constexpr int numDims = 2;
+constexpr double epsilon = 3;
 
 /***************************************************
  * Nearest neighbor search using nanoflann library
@@ -155,7 +156,17 @@ typedef SparseLU<SparseMatrix<double>> RbfSolver;
 // Radial basis function
 //
 double rbf(double r) {
-    return exp(-1*r*r);
+    double fact = epsilon * epsilon * r * r;
+#if 1
+    // gaussian
+    return exp(-fact);
+#else
+    // compact support gaussian bump
+    if(r < 1.0 / epsilon)
+       return exp(-1 / (1 - fact));
+    else
+       return 0;
+#endif
 }
 
 //
