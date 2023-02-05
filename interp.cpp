@@ -327,9 +327,9 @@ namespace GlobalData {
     VectorXi target_clusterSizes;
 
     //parameters
-    const int g_numPoints = 2000;
+    const int g_numPoints = 1799*1059;
     const int g_numTargetPoints = 4;
-    const int numNeighbors = 8;
+    const int numNeighbors = 3;
     const int numFields = 1;
     const int numClustersPerRank = 1;
     const bool use_cutoff_radius = false;
