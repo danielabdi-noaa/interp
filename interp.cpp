@@ -12,6 +12,8 @@
 using namespace std;
 using namespace Eigen;
 
+constexpr int numDims = 2;
+
 /***************************************************
  * Nearest neighbor search using nanoflann library
  **************************************************/
@@ -43,7 +45,7 @@ class PointCloud {
 //typdef nanonflann KDTree
 typedef nanoflann::KDTreeSingleIndexAdaptor<
     nanoflann::L2_Simple_Adaptor<double, PointCloud>, 
-    PointCloud, 3> KDTree;
+    PointCloud, numDims> KDTree;
 
 //find k nearaset neighbors at location "query" and return indices and distances
 void knn(const KDTree& index, int k, double* query, size_t* indices, double* distances) {
@@ -72,13 +74,12 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
 
     // Initialize the cluster centers
     for (int i = 0; i < numClusters; i++) {
-        clusterCenters(0,i) = points(0,i);
-        clusterCenters(1,i) = points(1,i);
-        clusterCenters(2,i) = points(2,i);
+        clusterCenters.col(i) = points.col(i);
     }
 
     // Perform k-means clustering until the cluster assignments stop changing
-    MatrixXd sumClusterCenters(3, numClusters);
+    MatrixXd sumClusterCenters(numDims, numClusters);
+    VectorXd d(3);
 
     bool converged = false;
     while (!converged) {
@@ -89,10 +90,9 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
             int closestCluster = -1;
             double minDistance = std::numeric_limits<double>::max();
             for (int j = 0; j < numClusters; j++) {
-                double dx = points(0,i) - clusterCenters(0,j);
-                double dy = points(1,i) - clusterCenters(1,j);
-                double dz = points(2,i) - clusterCenters(2,j);
-                double distance = dx*dx + dy*dy + dz*dz;
+                d  = points.col(i) - clusterCenters.col(j);
+                double distance = d.dot(d);
+
                 if (distance < minDistance) {
                     minDistance = distance;
                     closestCluster = j;
@@ -105,21 +105,17 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
         }
 
         // Update the cluster centers
-        sumClusterCenters.setZero(3,numClusters);
+        sumClusterCenters.setZero(numDims,numClusters);
         clusterSizes.setZero(numClusters);
 
         for (int i = 0; i < numPoints; i++) {
             int cluster = clusterAssignments(i);
-            sumClusterCenters(0,cluster) += points(0,i);
-            sumClusterCenters(1,cluster) += points(1,i);
-            sumClusterCenters(2,cluster) += points(2,i);
+            sumClusterCenters.col(cluster) += points.col(i);
             clusterSizes(cluster)++;
         }
         for (int i = 0; i < numClusters; i++) {
             if (clusterSizes(i) > 0) {
-                clusterCenters(0,i) = sumClusterCenters(0,i) / clusterSizes(i);
-                clusterCenters(1,i) = sumClusterCenters(1,i) / clusterSizes(i);
-                clusterCenters(2,i) = sumClusterCenters(2,i) / clusterSizes(i);
+                clusterCenters.col(i) = sumClusterCenters.col(i) / clusterSizes(i);
             }
         }
     }
@@ -182,7 +178,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
 
     vector<size_t> indices(numNeighbors);
     vector<double> distances(numNeighbors);
-    VectorXd query(3);
+    VectorXd query(numDims);
     for (int i = 0; i < numPoints; i++) {
 
         // Perform the k-nearest neighbor search
@@ -240,7 +236,7 @@ void rbf_build_symm(const KDTree& index, const MatrixXd& X,
     std::vector<T> tripletList;
     tripletList.reserve(numPoints * numNeighbors);
 
-    VectorXd query(3);
+    VectorXd query(numDims);
     std::vector<nanoflann::ResultItem<unsigned, double>> matches;
     for (int i = 0; i < numPoints; i++) {
 
@@ -327,7 +323,7 @@ namespace GlobalData {
     VectorXi target_clusterSizes;
 
     //parameters
-    const int g_numPoints = 1799*1059;
+    const int g_numPoints = 10000; //1799*1059;
     const int g_numTargetPoints = 4;
     const int numNeighbors = 3;
     const int numFields = 1;
@@ -349,6 +345,7 @@ namespace GlobalData {
 
         if(mpi_rank == 0) {
             std::cout << "===== Parameters ====" << std::endl
+                      << "numDims: " << numDims << std::endl
                       << "numPoints: " << g_numPoints << std::endl
                       << "numTargetPoints: " << g_numTargetPoints << std::endl
                       << "numNeighbors: " << numNeighbors << std::endl
@@ -368,50 +365,41 @@ namespace GlobalData {
         int numPoints = g_numPoints;
         int numTargetPoints = g_numTargetPoints;
         
-        MatrixXd points(3,numPoints);
+        MatrixXd points(numDims,numPoints);
         MatrixXd fields(numFields,numPoints);
         
         VectorXi clusterAssignments(numPoints);
-        MatrixXd clusterCenters(3,numClusters);
+        MatrixXd clusterCenters(numDims,numClusters);
         
         // Generate a set of random 3D points and associated field values
+        VectorXd d(numPoints);
+        points.setRandom();
+        clusterAssignments.setZero();
         for (int i = 0; i < numPoints; i++) {
-            points(0, i) = rand() / (double)RAND_MAX;
-            points(1, i) = rand() / (double)RAND_MAX;
-            points(2, i) = rand() / (double)RAND_MAX;
-            clusterAssignments(i) = rand() % numClusters;
             for(int j = 0; j < numFields; j++) {
-                double x = points(0, i);
-                double y = points(1, i);
-                double z = points(2, i);
-                fields(j, i) = x * y * z * (j + 1); //rand() / (double)RAND_MAX;
+                d = points.col(i);
+                fields(j, i) = d.dot(d) * (j + 1);
             }
         }
         
         // Initialize the target points
-        MatrixXd target_points(3, numTargetPoints);
+        MatrixXd target_points(numDims, numTargetPoints);
         VectorXi target_clusterAssignments(numTargetPoints);
+/*
+        //use same data as sources for testing
+        //should give identical results as the source
         for (int i = 0; i < numTargetPoints; i++) {
-            //*/
-            //use same data as sources for testing
-            //should give identical results as the source
-            target_points(0, i) = points(0, i);
-            target_points(1, i) = points(1, i);
-            target_points(2, i) = points(2, i);
-            /*/
-            //use random 3D points
-            target_points(0, i) = rand() / (double)RAND_MAX;
-            target_points(1, i) = rand() / (double)RAND_MAX;
-            target_points(2, i) = rand() / (double)RAND_MAX;
-            //*/
+            target_points.col(i) = points.col(i);
         }
+*/
+        target_points.setRandom();
         
         // Partition the points into N clusters using k-means clustering
         kMeansClustering(points, numPoints, numClusters,
                 clusterAssignments, clusterSizes, clusterCenters);
         
         // Sort points and fields
-        points_p = new MatrixXd(3, numPoints);
+        points_p = new MatrixXd(numDims, numPoints);
         fields_p = new MatrixXd(numFields, numPoints);
         MatrixXd& sorted_points = *points_p;
         MatrixXd& sorted_fields = *fields_p;
@@ -421,9 +409,7 @@ namespace GlobalData {
             for(int j = 0; j < numPoints; j++) {
                 if(clusterAssignments(j) != i)
                     continue;
-                sorted_points(0, idx) = points(0, j);
-                sorted_points(1, idx) = points(1, j);
-                sorted_points(2, idx) = points(2, j);
+                sorted_points.col(idx) = points.col(j);
                 for(int k = 0; k < numFields; k++)
                     sorted_fields(k, idx) = fields(k, j);
                 idx++;
@@ -436,10 +422,8 @@ namespace GlobalData {
             int closestCluster = -1;
             double minDistance = std::numeric_limits<double>::max();
             for (int j = 0; j < numClusters; j++) {
-                double dx = target_points(0, i) - clusterCenters(0, j);
-                double dy = target_points(1, i) - clusterCenters(1, j);
-                double dz = target_points(2, i) - clusterCenters(2, j);
-                double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+                d = target_points.col(i) - clusterCenters.col(j);
+                double distance = std::sqrt(d.dot(d));
                 if (distance < minDistance) {
                     minDistance = distance;
                     closestCluster = j;
@@ -450,7 +434,7 @@ namespace GlobalData {
         }
         
         // Sort target points
-        target_points_p = new MatrixXd(3, numTargetPoints);
+        target_points_p = new MatrixXd(numDims, numTargetPoints);
         MatrixXd& sorted_target_points = *target_points_p;
         
         idx = 0;
@@ -458,9 +442,7 @@ namespace GlobalData {
             for(int j = 0; j < numTargetPoints; j++) {
                 if(target_clusterAssignments(j) != i)
                     continue;
-                sorted_target_points(0, idx) = target_points(0, j);
-                sorted_target_points(1, idx) = target_points(1, j);
-                sorted_target_points(2, idx) = target_points(2, j);
+                sorted_target_points.col(idx) = target_points.col(j);
                 idx++;
             }
         }
@@ -494,7 +476,7 @@ struct ClusterData {
                 &numPoints, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
         //allocate space for points and fields
-        points.resize(3, numPoints);
+        points.resize(numDims, numPoints);
         fields.resize(numFields, numPoints);
 
         //offsets and coutns
@@ -506,12 +488,12 @@ struct ClusterData {
             int offset = 0;
             for(int i = 0; i < numClusters; i++) {
                 offsets(i) = offset;
-                counts(i) = clusterSizes(i) * 3;
+                counts(i) = clusterSizes(i) * numDims;
                 offset += counts(i);
             }
         }
         MPI_Scatterv(points_p ? points_p->data() : nullptr, counts.data(), offsets.data(), MPI_DOUBLE,
-                points.data(), numPoints * 3, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+                points.data(), numPoints * numDims, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
         //scatter fields
         if(mpi_rank == 0) {
@@ -529,7 +511,7 @@ struct ClusterData {
         MPI_Scatter(target_clusterSizes.data(), 1, MPI_INT,
                 &numTargetPoints, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-        target_points.resize(3, numTargetPoints);
+        target_points.resize(numDims, numTargetPoints);
         target_fields.resize(numFields, numTargetPoints);
 
         //Scatter target points
@@ -537,13 +519,13 @@ struct ClusterData {
             int offset = 0;
             for(int i = 0; i < numClusters; i++) {
                 offsets(i) = offset;
-                counts(i) = target_clusterSizes(i) * 3;
+                counts(i) = target_clusterSizes(i) * numDims;
                 offset += counts(i);
             }
         }
 
         MPI_Scatterv(target_points_p ? target_points_p->data() : nullptr, counts.data(), offsets.data(), MPI_DOUBLE,
-                target_points.data(), numTargetPoints * 3, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+                target_points.data(), numTargetPoints * numDims, MPI_DOUBLE, 0, MPI_COMM_WORLD);
             
     }
     //
@@ -559,17 +541,17 @@ struct ClusterData {
         //Gather target points
         interp_target_points_p = nullptr;
         if(mpi_rank == 0)
-            interp_target_points_p = new MatrixXd(3, g_numTargetPoints);
+            interp_target_points_p = new MatrixXd(numDims, g_numTargetPoints);
     
         if(mpi_rank == 0) {
             int offset = 0;
             for(int i = 0; i < numClusters; i++) {
                 offsets(i) = offset;
-                counts(i) = target_clusterSizes(i) * 3;
+                counts(i) = target_clusterSizes(i) * numDims;
                 offset += counts(i);
             }
         }
-        MPI_Gatherv(target_points.data(), numTargetPoints * 3, MPI_DOUBLE,
+        MPI_Gatherv(target_points.data(), numTargetPoints * numDims, MPI_DOUBLE,
                 interp_target_points_p ? interp_target_points_p->data() : nullptr, counts.data(), offsets.data(),
                 MPI_DOUBLE, 0, MPI_COMM_WORLD);
     
@@ -604,7 +586,7 @@ struct ClusterData {
     //
     void build_kdtree() {
         cloud = new PointCloud(points, numPoints);
-        ptree = new KDTree(3, *cloud, nanoflann::KDTreeSingleIndexAdaptorParams());
+        ptree = new KDTree(numDims, *cloud, nanoflann::KDTreeSingleIndexAdaptorParams());
         ptree->buildIndex();
     }
     //
@@ -639,7 +621,7 @@ struct ClusterData {
 
             //interpolate for target fields
             if(use_cutoff_radius) {
-                VectorXd query(3);
+                VectorXd query(numDims);
                 std::vector<nanoflann::ResultItem<unsigned, double>> matches;
                 for (int i = 0; i < numTargetPoints; i++) {
                     // Perform a radius search
@@ -654,7 +636,7 @@ struct ClusterData {
                     }
                 }
             } else {
-                VectorXd query(3);
+                VectorXd query(numDims);
                 vector<size_t> indices(numNeighbors);
                 vector<double> distances(numNeighbors);
                 for (int i = 0; i < numTargetPoints; i++) {
@@ -694,7 +676,7 @@ void split_cluster(const ClusterData& parent, int numClusters,
 ) {
     using GlobalData::numFields;
 
-    MatrixXd clusterCenters(3,numClusters);
+    MatrixXd clusterCenters(numDims,numClusters);
 
     VectorXi clusterAssignments(parent.numPoints);
     VectorXi clusterSizes;
@@ -708,7 +690,7 @@ void split_cluster(const ClusterData& parent, int numClusters,
     for(int i = 0; i < numClusters; i++) {
         ClusterData& cd = subclusters[i];
         cd.numPoints = clusterSizes(i);
-        cd.points.resize(3, cd.numPoints);
+        cd.points.resize(numDims, cd.numPoints);
         cd.fields.resize(numFields, cd.numPoints);
     }
 
@@ -719,24 +701,21 @@ void split_cluster(const ClusterData& parent, int numClusters,
         int idx = cidx[owner];
 
         ClusterData& cd = subclusters[owner];
-        cd.points(0,idx) = parent.points(0,i);
-        cd.points(1,idx) = parent.points(1,i);
-        cd.points(2,idx) = parent.points(2,i);
+        cd.points.col(idx) = parent.points.col(i);
         for(int f = 0; f < numFields; f++)
             cd.fields(f,idx) = parent.fields(f,i);
         cidx[owner]++;
     }
 
     // Partition target points
+    VectorXd d(3);
     target_clusterSizes.setZero(numClusters);
     for(int i = 0; i < parent.numTargetPoints; i++) {
         int closestCluster = -1;
         double minDistance = std::numeric_limits<double>::max();
         for (int j = 0; j < numClusters; j++) {
-            double dx = parent.target_points(0, i) - clusterCenters(0, j);
-            double dy = parent.target_points(1, i) - clusterCenters(1, j);
-            double dz = parent.target_points(2, i) - clusterCenters(2, j);
-            double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+            d = parent.target_points.col(i) - clusterCenters.col(j);
+            double distance = std::sqrt(d.dot(d));
             if (distance < minDistance) {
                 minDistance = distance;
                 closestCluster = j;
@@ -750,7 +729,7 @@ void split_cluster(const ClusterData& parent, int numClusters,
     for(int i = 0; i < numClusters; i++) {
         ClusterData& cd = subclusters[i];
         cd.numTargetPoints = target_clusterSizes(i);
-        cd.target_points.resize(3, cd.numTargetPoints);
+        cd.target_points.resize(numDims, cd.numTargetPoints);
         cd.target_fields.resize(numFields, cd.numTargetPoints);
     }
 
@@ -761,9 +740,7 @@ void split_cluster(const ClusterData& parent, int numClusters,
         int idx = target_cidx[owner];
 
         ClusterData& cd = subclusters[owner];
-        cd.target_points(0,idx) = parent.target_points(0,i);
-        cd.target_points(1,idx) = parent.target_points(1,i);
-        cd.target_points(2,idx) = parent.target_points(2,i);
+        cd.target_points.col(idx) = parent.target_points.col(i);
         target_cidx[owner]++;
     }
 }
