@@ -155,7 +155,7 @@ typedef SparseLU<SparseMatrix<double>> RbfSolver;
 // Radial basis function
 //
 double rbf(double r) {
-    return exp(-r*r);
+    return exp(-1*r*r);
 }
 
 //
@@ -330,6 +330,7 @@ namespace GlobalData {
     const int numClustersPerRank = 1;
     const bool use_cutoff_radius = false;
     const double cutoff_radius = 0.5;
+    const bool non_parametric = true;
 
     //initialize global params
     void init(int nc, int r) {
@@ -353,6 +354,7 @@ namespace GlobalData {
                       << "numClustersPerRank: " << numClustersPerRank << std::endl
                       << "use_cutoff_radius: " << (use_cutoff_radius ? "true" : "false") << std::endl
                       << "cutoff_radius: " << cutoff_radius << std::endl
+                      << "non_parametric: " << (non_parametric ? "true" : "false") << std::endl
                       << "=====================" << std::endl;
         }
     }
@@ -372,26 +374,28 @@ namespace GlobalData {
         MatrixXd clusterCenters(numDims,numClusters);
         
         // Generate a set of random 3D points and associated field values
-        VectorXd d(numPoints);
         points.setRandom();
         clusterAssignments.setZero();
         for (int i = 0; i < numPoints; i++) {
             for(int j = 0; j < numFields; j++) {
-                d = points.col(i);
-                fields(j, i) = d.dot(d) * (j + 1);
+                const double x = points.col(i).norm();
+                constexpr double pi = 3.14159265358979323846;
+                // wiki example function for rbf interpolation
+                fields(j, i) = exp(x*cos(3*pi*x)) * (j + 1);
             }
         }
-        
+#if 0
+        std::cout << "===================" << std::endl;
+        std::cout << points.transpose() << std::endl;
+        std::cout << "===================" << std::endl;
+        std::cout << fields.row(0).transpose() << std::endl;
+        std::cout << "===================" << std::endl;
+#endif
         // Initialize the target points
         MatrixXd target_points(numDims, numTargetPoints);
         VectorXi target_clusterAssignments(numTargetPoints);
-/*
-        //use same data as sources for testing
-        //should give identical results as the source
-        for (int i = 0; i < numTargetPoints; i++) {
-            target_points.col(i) = points.col(i);
-        }
-*/
+
+        //target_points = points.block(0,0,numDims,numTargetPoints);
         target_points.setRandom();
         
         // Partition the points into N clusters using k-means clustering
@@ -417,6 +421,7 @@ namespace GlobalData {
         }
         
         // Partition target points
+        VectorXd d(numPoints);
         target_clusterSizes.setZero(numClusters);
         for(int i = 0; i < numTargetPoints; i++) {
             int closestCluster = -1;
@@ -595,6 +600,8 @@ struct ClusterData {
     //
     void build_rbf() {
         using namespace GlobalData;
+        if(non_parametric)
+            return;
         A.resize(numPoints, numPoints);
         if(use_cutoff_radius)
             rbf_build_symm(*ptree, points, numPoints, numNeighbors, cutoff_radius, solver, A);
@@ -602,12 +609,12 @@ struct ClusterData {
             rbf_build(*ptree, points, numPoints, numNeighbors, solver, A);
     }
     //
-    // Interpolate for each field
+    // Interpolate each field using parameteric RBF
     //
     void solve_rbf() {
         using namespace GlobalData;
         VectorXd F(numPoints);
-        VectorXd C(numPoints);
+        VectorXd W(numPoints);
 
         target_fields.setZero();
 
@@ -617,7 +624,8 @@ struct ClusterData {
 
             //solve weights for this field
             F = fields.row(f);
-            rbf_solve(solver, F, C);
+            if(!non_parametric)
+                rbf_solve(solver, F, W);
 
             //interpolate for target fields
             if(use_cutoff_radius) {
@@ -629,10 +637,22 @@ struct ClusterData {
                     unsigned nMatches = knn_radius(*ptree, cutoff_radius, query.data(), matches);
 
                     // interpolate
+                    double sum = 0;
                     for (int k = 0; k < nMatches; k++) {
                         int j = matches[k].first;
                         double r = rbf(sqrt(matches[k].second));
-                        target_fields(f, i) += C(j) * r;
+                        if(!non_parametric)
+                            target_fields(f, i) += W(j) * r;
+                        else
+                            sum += r;
+                    }
+                    if(non_parametric)
+                    {
+                        for (int k = 0; k < nMatches; k++) {
+                            int j = matches[k].first;
+                            double r = rbf(sqrt(matches[k].second));
+                            target_fields(f, i) += F(j) * (r / sum);
+                        }
                     }
                 }
             } else {
@@ -645,10 +665,22 @@ struct ClusterData {
                     knn(*ptree, numNeighbors, query.data(), &indices[0], &distances[0]);
 
                     // interpolate
+                    double sum = 0;
                     for (int k = 0; k < numNeighbors; k++) {
                         int j = indices[k];
                         double r = rbf(sqrt(distances[k]));
-                        target_fields(f, i) += C(j) * r;
+                        if(!non_parametric)
+                            target_fields(f, i) += W(j) * r;
+                        else
+                            sum += r;
+                    }
+                    if(non_parametric)
+                    {
+                        for (int k = 0; k < numNeighbors; k++) {
+                            int j = indices[k];
+                            double r = rbf(sqrt(distances[k]));
+                            target_fields(f, i) += F(j) * (r / sum);
+                        }
                     }
                 }
             }
