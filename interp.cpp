@@ -189,7 +189,8 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
         for (int k = 0; k < numNeighbors; k++) {
             int j = indices[k];
             double r = rbf(sqrt(distances[k]));
-            tripletList.push_back(T(i,j,r));
+            if(fabs(r) > 1e-5)
+                tripletList.push_back(T(i,j,r));
         }
     }
 
@@ -248,7 +249,8 @@ void rbf_build_symm(const KDTree& index, const MatrixXd& X,
         for (int k = 0; k < nMatches; k++) {
             int j = matches[k].first;
             double r = rbf(sqrt(matches[k].second));
-            tripletList.push_back(T(i,j,r));
+            if(fabs(r) > 1e-5)
+                tripletList.push_back(T(i,j,r));
         }
 
     }
