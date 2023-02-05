@@ -163,67 +163,7 @@ double rbf(double r) {
 //
 void rbf_build(const KDTree& index, const MatrixXd& X,
         const int numPoints, const int numNeighbors,
-        RbfSolver& solver, SparseMatrix<double>& A
-        ) {
-
-    //
-    // Build sparse Matrix of radial basis function evaluations
-    //
-    std::cout << "Constructing interpolation matrix ..." << std::endl;
-    auto start = chrono::high_resolution_clock::now();
-
-    typedef Eigen::Triplet<double> T;
-    std::vector<T> tripletList;
-    tripletList.reserve(numPoints * numNeighbors);
-
-    vector<size_t> indices(numNeighbors);
-    vector<double> distances(numNeighbors);
-    VectorXd query(numDims);
-    for (int i = 0; i < numPoints; i++) {
-
-        // Perform the k-nearest neighbor search
-        query = X.col(i);
-        knn(index, numNeighbors, query.data(), &indices[0], &distances[0]);
-
-        // Add matrix coefficients
-        for (int k = 0; k < numNeighbors; k++) {
-            int j = indices[k];
-            double r = rbf(sqrt(distances[k]));
-            if(fabs(r) > 1e-5)
-                tripletList.push_back(T(i,j,r));
-        }
-    }
-
-    A.setFromTriplets(tripletList.begin(), tripletList.end());
-
-    auto stop = chrono::high_resolution_clock::now();
-    auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-    std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
-
-    //
-    // LU decomposition of the interpolation matrix
-    //
-    std::cout << "Started factorization ..." << std::endl;
-    start = stop;
-
-    solver.compute(A);
-
-    if(solver.info() != Success) {
-        std::cout << "Factorization failed." << std::endl;
-        exit(0);
-    }
-
-    stop = chrono::high_resolution_clock::now();
-    duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-    std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
-}
-
-//
-// Build symmetric sparse interpolation matrix and LU decompose it
-// Consider neighbors of specific distance
-//
-void rbf_build_symm(const KDTree& index, const MatrixXd& X,
-        const int numPoints, const int numNeighbors, const double cutoff_radius,
+        const bool use_cutoff_radius, const double cutoff_radius,
         RbfSolver& solver, SparseMatrix<double>& A
         ) {
 
@@ -238,21 +178,39 @@ void rbf_build_symm(const KDTree& index, const MatrixXd& X,
     tripletList.reserve(numPoints * numNeighbors);
 
     VectorXd query(numDims);
-    std::vector<nanoflann::ResultItem<unsigned, double>> matches;
-    for (int i = 0; i < numPoints; i++) {
 
-        // Perform a radius search
-        query = X.col(i);
-        unsigned nMatches = knn_radius(index, cutoff_radius, query.data(), matches);
+    if(use_cutoff_radius) {
+        std::vector<nanoflann::ResultItem<unsigned, double>> matches;
+        for (int i = 0; i < numPoints; i++) {
+            // Perform a radius search
+            query = X.col(i);
+            unsigned nMatches = knn_radius(index, cutoff_radius, query.data(), matches);
 
-        // Add matrix coefficients
-        for (int k = 0; k < nMatches; k++) {
-            int j = matches[k].first;
-            double r = rbf(sqrt(matches[k].second));
-            if(fabs(r) > 1e-5)
-                tripletList.push_back(T(i,j,r));
+            // Add matrix coefficients
+            for (int k = 0; k < nMatches; k++) {
+                int j = matches[k].first;
+                double r = rbf(sqrt(matches[k].second));
+                if(fabs(r) > 1e-4)
+                    tripletList.push_back(T(i,j,r));
+            }
         }
+    } else {
+        vector<size_t> indices(numNeighbors);
+        vector<double> distances(numNeighbors);
+        for (int i = 0; i < numPoints; i++) {
 
+            // Perform the k-nearest neighbor search
+            query = X.col(i);
+            knn(index, numNeighbors, query.data(), &indices[0], &distances[0]);
+
+            // Add matrix coefficients
+            for (int k = 0; k < numNeighbors; k++) {
+                int j = indices[k];
+                double r = rbf(sqrt(distances[k]));
+                if(fabs(r) > 1e-4)
+                    tripletList.push_back(T(i,j,r));
+            }
+        }
     }
 
     A.setFromTriplets(tripletList.begin(), tripletList.end());
@@ -605,10 +563,9 @@ struct ClusterData {
         if(non_parametric)
             return;
         A.resize(numPoints, numPoints);
-        if(use_cutoff_radius)
-            rbf_build_symm(*ptree, points, numPoints, numNeighbors, cutoff_radius, solver, A);
-        else
-            rbf_build(*ptree, points, numPoints, numNeighbors, solver, A);
+        rbf_build(*ptree, points, numPoints, numNeighbors,
+                  use_cutoff_radius, cutoff_radius,
+                  solver, A);
     }
     //
     // Interpolate each field using parameteric RBF
