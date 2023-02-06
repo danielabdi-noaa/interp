@@ -15,7 +15,16 @@ using namespace Eigen;
 constexpr int numDims = 2;
 constexpr double matrix_epsilon = 1e-5;
 
-constexpr double rbf_shape = 12;  // approximatly = 0.8 / avg_distance_between_nodes)
+// Rbf shape function can be computed approximately from
+// the average distance between points
+//     rbf_shape  = 0.8 / average_distance
+// Given npoints and numDims and [-1, 1] axis ranges
+//     average_distance = 2 / npoints^(1/numDims)
+//     rbf_shape = 0.4 * npoints^(1/numDims)
+constexpr double rbf_shape = 552;
+
+// Rbf smoothing factor, often set to 0 for interpolation
+// but can be set to positive value for noisy data.
 constexpr double rbf_smoothing = 0.01;
 
 /***************************************************
@@ -159,14 +168,14 @@ typedef SparseLU<SparseMatrix<double>> RbfSolver;
 // Radial basis function
 //
 double rbf(double r) {
-    double fact = rbf_shape * rbf_shape * r * r;
+    double fact = (rbf_shape * r);
 #if 1
     // gaussian
-    return exp(-fact);
+    return exp(-fact*fact);
 #else
     // compact support gaussian bump
     if(r < 1.0 / rbf_shape)
-       return exp(-1 / (1 - fact));
+       return exp(-1 / (1 - fact*fact));
     else
        return 0;
 #endif
@@ -301,14 +310,14 @@ namespace GlobalData {
     VectorXi target_clusterSizes;
 
     //parameters
-    const int g_numPoints = 10000; //1799*1059;
+    const int g_numPoints = 1799*1059;
     const int g_numTargetPoints = 4;
-    const int numNeighbors = 3;
+    const int numNeighbors = 4;
     const int numFields = 1;
     const int numClustersPerRank = 1;
     const bool use_cutoff_radius = false;
     const double cutoff_radius = 0.5;
-    const bool non_parametric = true;
+    const bool non_parametric = false;
 
     //initialize global params
     void init(int nc, int r) {
