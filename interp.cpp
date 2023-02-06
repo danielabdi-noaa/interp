@@ -169,16 +169,21 @@ typedef SparseLU<SparseMatrix<double>> RbfSolver;
 //
 double rbf(double r) {
     double fact = (rbf_shape * r);
-#if 1
+
     // gaussian
     return exp(-fact*fact);
-#else
+
+    // multiquadric
+    //return sqrt(1 + fact*fact);
+
+    // inverse multiquadric
+    //return 1 / sqrt(1 + fact*fact);
+
     // compact support gaussian bump
-    if(r < 1.0 / rbf_shape)
-       return exp(-1 / (1 - fact*fact));
-    else
-       return 0;
-#endif
+    //if(r < 1.0 / rbf_shape)
+    //   return exp(-1 / (1 - fact*fact));
+    //else
+    //   return 0;
 }
 
 //
