@@ -605,73 +605,81 @@ struct ClusterData {
     void solve_rbf() {
         using namespace GlobalData;
         VectorXd F(numPoints);
-        VectorXd W(numPoints);
+        MatrixXd W(numPoints, numFields);
 
         target_fields.setZero();
 
-        for(int f = 0; f < numFields; f++) {
+        std::cout << "===========================" << std::endl;
 
-            std::cout << "==== Interpolating field " << f << " ====" << std::endl;
+        //compute weights for each field
+        if(!non_parametric) {
+            VectorXd Wf(numPoints);
+            std::cout << "Computing weights for all fields" << std::endl;
+            for(int f = 0; f < numFields; f++) {
+                F = fields.row(f);
+                rbf_solve(solver, F, Wf);
+                W.col(f) = Wf;
+            }
+        }
 
-            //solve weights for this field
-            F = fields.row(f);
-            if(!non_parametric)
-                rbf_solve(solver, F, W);
+        //interpolate for target fields
+        std::cout << "Interpolating fields" << std::endl;
+        if(use_cutoff_radius) {
+            VectorXd query(numDims);
+            std::vector<nanoflann::ResultItem<unsigned, double>> matches;
+            for (int i = 0; i < numTargetPoints; i++) {
+                // Perform a radius search
+                query = target_points.col(i);
+                unsigned nMatches = knn_radius(*ptree, cutoff_radius, query.data(), matches);
 
-            //interpolate for target fields
-            if(use_cutoff_radius) {
-                VectorXd query(numDims);
-                std::vector<nanoflann::ResultItem<unsigned, double>> matches;
-                for (int i = 0; i < numTargetPoints; i++) {
-                    // Perform a radius search
-                    query = target_points.col(i);
-                    unsigned nMatches = knn_radius(*ptree, cutoff_radius, query.data(), matches);
-
-                    // interpolate
-                    double sum = 0;
+                // interpolate
+                double sum = 0;
+                for (int k = 0; k < nMatches; k++) {
+                    int j = matches[k].first;
+                    double r = rbf(sqrt(matches[k].second));
+                    if(!non_parametric) {
+                        for(int f = 0; f < numFields; f++)
+                            target_fields(f, i) += W(j, f) * r;
+                    } else
+                        sum += r;
+                }
+                if(non_parametric)
+                {
                     for (int k = 0; k < nMatches; k++) {
                         int j = matches[k].first;
                         double r = rbf(sqrt(matches[k].second));
-                        if(!non_parametric)
-                            target_fields(f, i) += W(j) * r;
-                        else
-                            sum += r;
-                    }
-                    if(non_parametric)
-                    {
-                        for (int k = 0; k < nMatches; k++) {
-                            int j = matches[k].first;
-                            double r = rbf(sqrt(matches[k].second));
-                            target_fields(f, i) += F(j) * (r / sum);
-                        }
+                        for(int f = 0; f < numFields; f++)
+                            target_fields(f, i) += fields(f, j) * (r / sum);
                     }
                 }
-            } else {
-                VectorXd query(numDims);
-                vector<size_t> indices(numNeighbors);
-                vector<double> distances(numNeighbors);
-                for (int i = 0; i < numTargetPoints; i++) {
-                    // Perform the k-nearest neighbor search
-                    query = target_points.col(i);
-                    knn(*ptree, numNeighbors, query.data(), &indices[0], &distances[0]);
+            }
+        } else {
+            VectorXd query(numDims);
+            vector<size_t> indices(numNeighbors);
+            vector<double> distances(numNeighbors);
+            for (int i = 0; i < numTargetPoints; i++) {
+                // Perform the k-nearest neighbor search
+                query = target_points.col(i);
+                knn(*ptree, numNeighbors, query.data(), &indices[0], &distances[0]);
 
-                    // interpolate
-                    double sum = 0;
+                // interpolate
+                double sum = 0;
+                for (int k = 0; k < numNeighbors; k++) {
+                    int j = indices[k];
+                    double r = rbf(sqrt(distances[k]));
+                    if(!non_parametric) {
+                        for(int f = 0; f < numFields; f++)
+                            target_fields(f, i) += W(j, f) * r;
+                    } else
+                        sum += r;
+                }
+                if(non_parametric)
+                {
                     for (int k = 0; k < numNeighbors; k++) {
                         int j = indices[k];
                         double r = rbf(sqrt(distances[k]));
-                        if(!non_parametric)
-                            target_fields(f, i) += W(j) * r;
-                        else
-                            sum += r;
-                    }
-                    if(non_parametric)
-                    {
-                        for (int k = 0; k < numNeighbors; k++) {
-                            int j = indices[k];
-                            double r = rbf(sqrt(distances[k]));
-                            target_fields(f, i) += F(j) * (r / sum);
-                        }
+                        for(int f = 0; f < numFields; f++)
+                            target_fields(f, i) += fields(f, j) * (r / sum);
                     }
                 }
             }
