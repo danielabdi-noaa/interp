@@ -7,6 +7,7 @@
 #include <Eigen/Sparse>
 #include <mpi.h>
 #include <chrono>
+#include <eccodes.h>
 #include "knn/nanoflann.hpp"
 
 using namespace std;
@@ -363,10 +364,13 @@ namespace GlobalData {
     // Generate random data
     //
     void generate_random_data(
-          int numPoints, int numTargetPoints,
           MatrixXd*& points, MatrixXd*& fields,
           MatrixXd*& target_points
     ) {
+        int numPoints = 1799*1059;
+        int numTargetPoints = 4;
+        numFields = 1;
+
         // Allocate
         points = new MatrixXd(numDims, numPoints);
         fields = new MatrixXd(numFields, numPoints);
@@ -386,6 +390,9 @@ namespace GlobalData {
         // Generate random set of target points
         target_points->setRandom();
 
+        // Save global number of points
+        g_numPoints = numPoints;
+        g_numTargetPoints = numTargetPoints;
 #if 0
         std::cout << "===================" << std::endl;
         std::cout << points->transpose() << std::endl;
@@ -393,6 +400,73 @@ namespace GlobalData {
         std::cout << fields->row(0).transpose() << std::endl;
         std::cout << "===================" << std::endl;
 #endif
+    }
+
+    //
+    // Read grib file
+    //
+    void read_grib_file(
+          const char* filename,
+          MatrixXd*& points, MatrixXd*& fields,
+          MatrixXd*& target_points
+    ) {
+        int ret;
+        size_t numPoints, numTargetPoints;
+
+        //hard code longitude and latitude index
+        const int idx_nlat = 990;
+        const int idx_elon = 991;
+        const double lat_min = 21.14;
+        const double lat_max = 52.63;
+        const double lon_min = 225.9;
+        const double lon_max = 299.1;
+
+        // Count the total number of fields in the GRIB2 file
+        FILE* fp = fopen(filename, "r");
+        numFields = 0;
+        while (codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret)) {
+          if(numFields == 0) {
+              CODES_CHECK(codes_get_size(h, "values", &numPoints), 0);
+          }
+          codes_handle_delete(h);
+          ++numFields;
+        }
+        numTargetPoints = 10;
+        rewind(fp);
+
+        // Save global number of points
+        g_numPoints = numPoints;
+        g_numTargetPoints = numTargetPoints;
+
+        // Allocate
+        points = new MatrixXd(numDims, numPoints);
+        fields = new MatrixXd(numFields, numPoints);
+        target_points = new MatrixXd(numDims, numTargetPoints);
+
+        // loop through all fields and read data
+        VectorXd values(numPoints);
+        int idx = 0;
+        while (codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret)) {
+
+          CODES_CHECK(codes_get_double_array(h, "values",
+                      values.data(), &numPoints), 0);
+
+          fields->row(idx) = values;
+
+          codes_handle_delete(h);
+          idx++;
+        }
+
+        // assign longitude and latitude
+        points->row(0) = fields->row(idx_nlat);
+        points->row(1) = fields->row(idx_elon);
+
+        // Generate random target points in the given lat/lon range
+        target_points->setRandom();
+        target_points->row(0) = (target_points->row(0).array() + 1.0) /
+                                2.0 * (lat_max - lat_min) + lat_min;
+        target_points->row(1) = (target_points->row(1).array() + 1.0) /
+                                2.0 * (lon_max - lon_min) + lon_min;
     }
 
     //
@@ -472,13 +546,10 @@ namespace GlobalData {
 
         MatrixXd *points = nullptr, *fields = nullptr, *target_points = nullptr;
 
-        // Random data for testing
-        g_numPoints = 1799*1059;
-        g_numTargetPoints = 4;
-        numFields = 1;
+        //generate_random_data(points, fields, target_points);
 
-        generate_random_data(
-            g_numPoints, g_numTargetPoints,
+        read_grib_file(
+           "/home/daniel/interp/rrfs.t21z.prslev.f002.conus_3km.grib2",
             points, fields, target_points);
 
         std::cout << "===== Data size ====" << std::endl
