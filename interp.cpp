@@ -12,7 +12,14 @@
 using namespace std;
 using namespace Eigen;
 
+/***************************************************
+ * Parameters for the interpolation
+ **************************************************/
+
+// number of dimesnions 1D,2D,3D are supported
 constexpr int numDims = 2;
+
+// matrix coefficients below this value are zeroed (pruned)
 constexpr double matrix_epsilon = 1e-5;
 
 // Rbf shape function can be computed approximately from
@@ -26,6 +33,19 @@ constexpr double rbf_shape = 552;
 // Rbf smoothing factor, often set to 0 for interpolation
 // but can be set to positive value for noisy data.
 constexpr double rbf_smoothing = 0.01;
+
+// Number of neighbors to consider for interpolation
+const int numNeighbors = 4;
+
+// Cutoff radius for nearest neighbor interpolation
+constexpr bool use_cutoff_radius = false;
+constexpr double cutoff_radius = 0.5;
+
+// Flag to set non-parameteric RBF interpolation
+constexpr bool non_parametric = false;
+
+// Number of clusters to process per MPI rank
+const int numClustersPerRank = 1;
 
 /***************************************************
  * Nearest neighbor search using nanoflann library
@@ -190,9 +210,7 @@ double rbf(double r) {
 // Build sparse interpolation matrix and LU decompose it
 //
 void rbf_build(const KDTree& index, const MatrixXd& X,
-        const int numPoints, const int numNeighbors,
-        const bool use_cutoff_radius, const double cutoff_radius,
-        RbfSolver& solver, SparseMatrix<double>& A
+        const int numPoints, RbfSolver& solver, SparseMatrix<double>& A
         ) {
 
     //
@@ -315,14 +333,9 @@ namespace GlobalData {
     VectorXi target_clusterSizes;
 
     //parameters
-    const int g_numPoints = 1799*1059;
-    const int g_numTargetPoints = 4;
-    const int numNeighbors = 4;
-    const int numFields = 1;
-    const int numClustersPerRank = 1;
-    const bool use_cutoff_radius = false;
-    const double cutoff_radius = 0.5;
-    const bool non_parametric = false;
+    int g_numPoints;
+    int g_numTargetPoints;
+    int numFields;
 
     //initialize global params
     void init(int nc, int r) {
@@ -339,58 +352,63 @@ namespace GlobalData {
         if(mpi_rank == 0) {
             std::cout << "===== Parameters ====" << std::endl
                       << "numDims: " << numDims << std::endl
-                      << "numPoints: " << g_numPoints << std::endl
-                      << "numTargetPoints: " << g_numTargetPoints << std::endl
                       << "numNeighbors: " << numNeighbors << std::endl
-                      << "numFields: " << numFields << std::endl
                       << "numClustersPerRank: " << numClustersPerRank << std::endl
                       << "use_cutoff_radius: " << (use_cutoff_radius ? "true" : "false") << std::endl
                       << "cutoff_radius: " << cutoff_radius << std::endl
-                      << "non_parametric: " << (non_parametric ? "true" : "false") << std::endl
-                      << "=====================" << std::endl;
+                      << "non_parametric: " << (non_parametric ? "true" : "false") << std::endl;
         }
     }
     //
-    // Read and partition data on master node. Assumes node is big enough
-    // to store and process the data. Currently it generates random data.
+    // Generate random data
     //
-    void read_and_partition_data() {
-        // coordinates and fields to interpolate
-        int numPoints = g_numPoints;
-        int numTargetPoints = g_numTargetPoints;
+    void generate_random_data(
+          int numPoints, int numTargetPoints,
+          MatrixXd*& points, MatrixXd*& fields,
+          MatrixXd*& target_points
+    ) {
+        // Allocate
+        points = new MatrixXd(numDims, numPoints);
+        fields = new MatrixXd(numFields, numPoints);
+        target_points = new MatrixXd(numDims, numTargetPoints);
         
-        MatrixXd points(numDims,numPoints);
-        MatrixXd fields(numFields,numPoints);
-        
+        // Generate a set of random 3D points and associated field values
+        points->setRandom();
+        for (int i = 0; i < numPoints; i++) {
+            for(int j = 0; j < numFields; j++) {
+                const double x = points->col(i).norm();
+                constexpr double pi = 3.14159265358979323846;
+                // wiki example function for rbf interpolation
+                (*fields)(j, i) = exp(x*cos(3*pi*x)) * (j + 1);
+            }
+        }
+
+        // Generate random set of target points
+        target_points->setRandom();
+
+#if 0
+        std::cout << "===================" << std::endl;
+        std::cout << points->transpose() << std::endl;
+        std::cout << "===================" << std::endl;
+        std::cout << fields->row(0).transpose() << std::endl;
+        std::cout << "===================" << std::endl;
+#endif
+    }
+
+    //
+    // Partition data across MPI ranks
+    //
+    void partition_data(
+          int numPoints, int numTargetPoints,
+          const MatrixXd& points, const MatrixXd& fields,
+          const MatrixXd& target_points
+    ) {
+
+        // Partition the source points into N clusters
         VectorXi clusterAssignments(numPoints);
         MatrixXd clusterCenters(numDims,numClusters);
         
-        // Generate a set of random 3D points and associated field values
-        points.setRandom();
         clusterAssignments.setZero();
-        for (int i = 0; i < numPoints; i++) {
-            for(int j = 0; j < numFields; j++) {
-                const double x = points.col(i).norm();
-                constexpr double pi = 3.14159265358979323846;
-                // wiki example function for rbf interpolation
-                fields(j, i) = exp(x*cos(3*pi*x)) * (j + 1);
-            }
-        }
-#if 0
-        std::cout << "===================" << std::endl;
-        std::cout << points.transpose() << std::endl;
-        std::cout << "===================" << std::endl;
-        std::cout << fields.row(0).transpose() << std::endl;
-        std::cout << "===================" << std::endl;
-#endif
-        // Initialize the target points
-        MatrixXd target_points(numDims, numTargetPoints);
-        VectorXi target_clusterAssignments(numTargetPoints);
-
-        //target_points = points.block(0,0,numDims,numTargetPoints);
-        target_points.setRandom();
-        
-        // Partition the points into N clusters using k-means clustering
         kMeansClustering(points, numPoints, numClusters,
                 clusterAssignments, clusterSizes, clusterCenters);
         
@@ -414,6 +432,8 @@ namespace GlobalData {
         
         // Partition target points
         VectorXd d(numPoints);
+        VectorXi target_clusterAssignments(numTargetPoints);
+
         target_clusterSizes.setZero(numClusters);
         for(int i = 0; i < numTargetPoints; i++) {
             int closestCluster = -1;
@@ -444,6 +464,35 @@ namespace GlobalData {
             }
         }
     }
+    //
+    // Read and partition data on master node. Assumes node is big enough
+    // to store and process the data.
+    //
+    void read_and_partition_data() {
+
+        MatrixXd *points = nullptr, *fields = nullptr, *target_points = nullptr;
+
+        // Random data for testing
+        g_numPoints = 1799*1059;
+        g_numTargetPoints = 4;
+        numFields = 1;
+
+        generate_random_data(
+            g_numPoints, g_numTargetPoints,
+            points, fields, target_points);
+
+        std::cout << "===== Data size ====" << std::endl
+                  << "numPoints: " << g_numPoints << std::endl
+                  << "numTargetPoints: " << g_numTargetPoints << std::endl
+                  << "numFields: " << numFields << std::endl
+                  << "=====================" << std::endl;
+
+        // Partition data across mpi ranks
+        partition_data(
+            g_numPoints, g_numTargetPoints,
+            *points, *fields, *target_points);
+    }
+
 };
 
 /*************************************
@@ -591,13 +640,10 @@ struct ClusterData {
     // or cutoff radius criteria
     //
     void build_rbf() {
-        using namespace GlobalData;
         if(non_parametric)
             return;
         A.resize(numPoints, numPoints);
-        rbf_build(*ptree, points, numPoints, numNeighbors,
-                  use_cutoff_radius, cutoff_radius,
-                  solver, A);
+        rbf_build(*ptree, points, numPoints, solver, A);
     }
     //
     // Interpolate each field using parameteric RBF
@@ -829,8 +875,6 @@ int main(int argc, char** argv) {
     parent_cluster.scatter();
 
     // build and solve rbf interpolation
-    using GlobalData::numClustersPerRank;
-
     if(numClustersPerRank <= 1)
     {
         parent_cluster.build_and_solve();
