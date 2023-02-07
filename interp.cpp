@@ -29,24 +29,24 @@ constexpr double matrix_epsilon = 1e-5;
 // Given npoints and numDims and [-1, 1] axis ranges
 //     average_distance = 2 / npoints^(1/numDims)
 //     rbf_shape = 0.4 * npoints^(1/numDims)
-constexpr double rbf_shape = 552;
+constexpr double rbf_shape = 64;
 
 // Rbf smoothing factor, often set to 0 for interpolation
 // but can be set to positive value for noisy data.
 constexpr double rbf_smoothing = 0.01;
 
 // Number of neighbors to consider for interpolation
-const int numNeighbors = 4;
+constexpr int numNeighbors = 8;
 
 // Cutoff radius for nearest neighbor interpolation
 constexpr bool use_cutoff_radius = false;
 constexpr double cutoff_radius = 0.5;
 
 // Flag to set non-parameteric RBF interpolation
-constexpr bool non_parametric = false;
+constexpr bool non_parametric = true; //false;
 
 // Number of clusters to process per MPI rank
-const int numClustersPerRank = 1;
+constexpr int numClustersPerRank = 1;
 
 /***************************************************
  * Nearest neighbor search using nanoflann library
@@ -338,6 +338,13 @@ namespace GlobalData {
     int g_numTargetPoints;
     int numFields;
 
+    // lat/lon boundaries, use offest to account
+    // for curved HRRR grid
+    const double lat_min = 21.14 + 10;
+    const double lat_max = 52.63 - 10;
+    const double lon_min = 225.9 + 10;
+    const double lon_max = 299.1 - 10;
+
     //initialize global params
     void init(int nc, int r) {
         numClusters = nc;
@@ -368,8 +375,12 @@ namespace GlobalData {
           MatrixXd*& target_points
     ) {
         int numPoints = 1799*1059;
-        int numTargetPoints = 4;
+        int numTargetPoints = 100;
         numFields = 1;
+
+        // Save global number of points
+        g_numPoints = numPoints;
+        g_numTargetPoints = numTargetPoints;
 
         // Allocate
         points = new MatrixXd(numDims, numPoints);
@@ -386,20 +397,17 @@ namespace GlobalData {
                 (*fields)(j, i) = exp(x*cos(3*pi*x)) * (j + 1);
             }
         }
+        points->row(0) = (points->row(0).array() + 1.0) /
+                                2.0 * (lat_max - lat_min) + lat_min;
+        points->row(1) = (points->row(1).array() + 1.0) /
+                                2.0 * (lon_max - lon_min) + lon_min;
 
         // Generate random set of target points
         target_points->setRandom();
-
-        // Save global number of points
-        g_numPoints = numPoints;
-        g_numTargetPoints = numTargetPoints;
-#if 0
-        std::cout << "===================" << std::endl;
-        std::cout << points->transpose() << std::endl;
-        std::cout << "===================" << std::endl;
-        std::cout << fields->row(0).transpose() << std::endl;
-        std::cout << "===================" << std::endl;
-#endif
+        target_points->row(0) = (target_points->row(0).array() + 1.0) /
+                                2.0 * (lat_max - lat_min) + lat_min;
+        target_points->row(1) = (target_points->row(1).array() + 1.0) /
+                                2.0 * (lon_max - lon_min) + lon_min;
     }
 
     //
@@ -411,15 +419,11 @@ namespace GlobalData {
           MatrixXd*& target_points
     ) {
         int ret;
-        size_t numPoints, numTargetPoints;
+        size_t numPoints = 1799*1059, numTargetPoints;
 
         //hard code longitude and latitude index
         const int idx_nlat = 990;
         const int idx_elon = 991;
-        const double lat_min = 21.14;
-        const double lat_max = 52.63;
-        const double lon_min = 225.9;
-        const double lon_max = 299.1;
 
         // Count the total number of fields in the GRIB2 file
         FILE* fp = fopen(filename, "r");
@@ -431,8 +435,11 @@ namespace GlobalData {
           codes_handle_delete(h);
           ++numFields;
         }
-        numTargetPoints = 10;
         rewind(fp);
+
+        // set these values just for testing
+        numTargetPoints = 100;
+        numFields = 1;
 
         // Save global number of points
         g_numPoints = numPoints;
@@ -445,21 +452,30 @@ namespace GlobalData {
 
         // loop through all fields and read data
         VectorXd values(numPoints);
-        int idx = 0;
+        int idx = 0, f = 0;
         while (codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret)) {
 
-          CODES_CHECK(codes_get_double_array(h, "values",
-                      values.data(), &numPoints), 0);
+          if(idx < numFields) {
+            CODES_CHECK(codes_get_double_array(h, "values",
+                        values.data(), &numPoints), 0);
 
-          fields->row(idx) = values;
+            fields->row(f) = values;
+            f++;
+          } else if(idx == idx_nlat) {
+            CODES_CHECK(codes_get_double_array(h, "values",
+                        values.data(), &numPoints), 0);
+
+            points->row(0) = values;
+          } else if(idx == idx_elon) {
+            CODES_CHECK(codes_get_double_array(h, "values",
+                        values.data(), &numPoints), 0);
+
+            points->row(1) = values;
+          }
 
           codes_handle_delete(h);
           idx++;
         }
-
-        // assign longitude and latitude
-        points->row(0) = fields->row(idx_nlat);
-        points->row(1) = fields->row(idx_elon);
 
         // Generate random target points in the given lat/lon range
         target_points->setRandom();
@@ -546,11 +562,13 @@ namespace GlobalData {
 
         MatrixXd *points = nullptr, *fields = nullptr, *target_points = nullptr;
 
-        //generate_random_data(points, fields, target_points);
-
+#if 1
+        generate_random_data(points, fields, target_points);
+#else
         read_grib_file(
            "/home/daniel/interp/rrfs.t21z.prslev.f002.conus_3km.grib2",
             points, fields, target_points);
+#endif
 
         std::cout << "===== Data size ====" << std::endl
                   << "numPoints: " << g_numPoints << std::endl
