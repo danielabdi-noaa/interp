@@ -188,21 +188,24 @@ typedef SparseLU<SparseMatrix<double>> RbfSolver;
 //
 // Radial basis function
 //
-double rbf(double r) {
-    double fact = (rbf_shape * r);
+double rbf(double r_) {
+    double r = (rbf_shape * r_);
 
     // gaussian
-    return exp(-fact*fact);
+    return exp(-r*r);
 
     // multiquadric
-    //return sqrt(1 + fact*fact);
+    //return sqrt(1 + r*r);
 
     // inverse multiquadric
-    //return 1 / sqrt(1 + fact*fact);
+    //return 1 / sqrt(1 + r*r);
+
+    // thin plate spline
+    //return r*r*log(r+1e-5);
 
     // compact support gaussian bump
     //if(r < 1.0 / rbf_shape)
-    //   return exp(-1 / (1 - fact*fact));
+    //   return exp(-1 / (1 - r*r));
     //else
     //   return 0;
 }
