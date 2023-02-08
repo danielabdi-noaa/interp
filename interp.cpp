@@ -192,7 +192,7 @@ double rbf(double r_) {
     double r = (rbf_shape * r_);
 
     // gaussian
-    return exp(-r*r);
+    // return exp(-r*r);
 
     // multiquadric
     //return sqrt(1 + r*r);
@@ -208,6 +208,9 @@ double rbf(double r_) {
     //   return exp(-1 / (1 - r*r));
     //else
     //   return 0;
+
+    // inverse-distance interp
+    return 1.0 / pow(r_,3);
 }
 
 //
@@ -348,6 +351,12 @@ namespace GlobalData {
     const double lon_min = 225.9 + 10;
     const double lon_max = 299.1 - 10;
 
+    // input/output grid dimensions
+    const int n_lon_i = 1799;
+    const int n_lat_i = 1059;
+    const int n_lon_o = 7000;
+    const int n_lat_o = 3500;
+
     //initialize global params
     void init(int nc, int r) {
         numClusters = nc;
@@ -377,8 +386,8 @@ namespace GlobalData {
           MatrixXd*& points, MatrixXd*& fields,
           MatrixXd*& target_points
     ) {
-        int numPoints = 1799*1059;
-        int numTargetPoints = 100;
+        int numPoints = n_lat_i*n_lon_i;
+        int numTargetPoints = n_lat_o*n_lon_o;
         numFields = 1;
 
         // Save global number of points
@@ -443,7 +452,7 @@ namespace GlobalData {
         rewind(fp);
 
         // set these values just for testing
-        numTargetPoints = 100;
+        numTargetPoints = n_lat_o * n_lon_o;
         numFields = 1;
 
         // Save global number of points
@@ -482,12 +491,38 @@ namespace GlobalData {
           idx++;
         }
 
+#if 1
+        std::cout << "Writing input field for plotting" << std::endl;
+        FILE* fh = fopen("input.txt", "w");
+        for(int i = 0; i < g_numPoints; i++) {
+           fprintf(fh, "%.2f %.2f %.2f\n",
+               (*points)(0,i),
+               (*points)(1,i),
+               (*fields)(0,i));
+        }
+        fclose(fh);
+#endif
+
         // Generate random target points in the given lat/lon range
+#if 0
         target_points->setRandom();
         target_points->row(0) = (target_points->row(0).array() + 1.0) /
                                 2.0 * (lat_max - lat_min) + lat_min;
         target_points->row(1) = (target_points->row(1).array() + 1.0) /
                                 2.0 * (lon_max - lon_min) + lon_min;
+#else
+        std::cout << "Reading interpolation grid" << std::endl;
+        fh = fopen("grid.txt", "r");
+        char buffer[256];
+        idx = 0;
+        while(fgets(buffer, 256, fh)) {
+           float lat,lon;
+           sscanf(buffer, "%f %f", &lat, &lon);
+           (*target_points)(0, idx) = lat;
+           (*target_points)(1, idx) = lon;
+           idx++;
+        }
+#endif
     }
 
     //
@@ -500,6 +535,21 @@ namespace GlobalData {
         VectorXd values(size);
         FILE* fp_s = fopen(filename_s, "r");
         if(!fp_s) return;
+
+#if 1
+        std::cout << "Writing input field for plotting" << std::endl;
+        FILE* fh = fopen("output.txt", "w");
+        for(int i = 0; i < g_numTargetPoints; i++) {
+           fprintf(fh, "%.2f %.2f %.2f\n",
+             (*interp_target_points_p)(0,i),
+             (*interp_target_points_p)(1,i),
+             (*interp_target_fields_p)(0,i));
+        }
+        fclose(fh);
+#endif
+
+        std::cout << "Writing output grib file." << std::endl;
+        auto start = chrono::high_resolution_clock::now();
 
         int ret, idx = 0;
         while (codes_handle* h = codes_handle_new_from_file(0, fp_s, PRODUCT_GRIB, &ret)) {
@@ -522,14 +572,14 @@ namespace GlobalData {
           // clone handle and write to output file
           codes_handle* new_h = codes_handle_clone(h);
 
-          codes_set_long(new_h, "Nx", 10);
-          codes_set_long(new_h, "Ny", 10);
+          codes_set_long(new_h, "Nx", n_lon_o);
+          codes_set_long(new_h, "Ny", n_lat_o);
           codes_set_long(new_h, "numberOfDataPoints", size);
           codes_set_long(new_h, "numberOfValues", size);
           codes_set_long(new_h, "getNumberOfValues", size);
 
           if(bitsPerValue > 0) {
-             values.setZero();// = interp_target_fields_p->row(idx);
+             values = interp_target_fields_p->row(idx);
 
              CODES_CHECK(codes_set_double_array(new_h, "values",
                       values.data(), size), 0);
@@ -541,7 +591,13 @@ namespace GlobalData {
           // delete handle
           codes_handle_delete(h);
           idx++;
+
+          if(idx >= numFields) break;
         }
+
+        auto stop = chrono::high_resolution_clock::now();
+        auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
+        std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
     }
     //
     // Partition data across MPI ranks
@@ -818,6 +874,8 @@ struct ClusterData {
 
         //interpolate for target fields
         std::cout << "Interpolating fields" << std::endl;
+        auto start = chrono::high_resolution_clock::now();
+
         if(use_cutoff_radius) {
             VectorXd query(numDims);
             std::vector<nanoflann::ResultItem<unsigned, double>> matches;
@@ -878,6 +936,9 @@ struct ClusterData {
                 }
             }
         }
+        auto stop = chrono::high_resolution_clock::now();
+        auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
+        std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
     }
     //
     // Conveneince function to build and solve rbf interpolation
