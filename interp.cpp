@@ -43,7 +43,7 @@ constexpr bool use_cutoff_radius = false;
 constexpr double cutoff_radius = 0.5;
 
 // Flag to set non-parameteric RBF interpolation
-constexpr bool non_parametric = true; //false;
+constexpr bool non_parametric = true;
 
 // Number of clusters to process per MPI rank
 constexpr int numClustersPerRank = 1;
@@ -422,7 +422,7 @@ namespace GlobalData {
           MatrixXd*& target_points
     ) {
         int ret;
-        size_t numPoints = 1799*1059, numTargetPoints;
+        size_t numPoints, numTargetPoints;
 
         //hard code longitude and latitude index
         const int idx_nlat = 990;
@@ -430,6 +430,8 @@ namespace GlobalData {
 
         // Count the total number of fields in the GRIB2 file
         FILE* fp = fopen(filename, "r");
+        if(!fp) return;
+
         numFields = 0;
         while (codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret)) {
           if(numFields == 0) {
@@ -488,6 +490,59 @@ namespace GlobalData {
                                 2.0 * (lon_max - lon_min) + lon_min;
     }
 
+    //
+    // write grib file
+    //
+    void write_grib_file() {
+        const char* filename_s = "rrfs.t21z.prslev.f002.conus_3km.grib2";
+        const char* filename_d = "out.grib2";
+        size_t size = g_numTargetPoints;
+        VectorXd values(size);
+        FILE* fp_s = fopen(filename_s, "r");
+        if(!fp_s) return;
+
+        int ret, idx = 0;
+        while (codes_handle* h = codes_handle_new_from_file(0, fp_s, PRODUCT_GRIB, &ret)) {
+
+          long bitsPerValue = 0;
+          codes_get_long(h, "bitsPerValue", &bitsPerValue);
+
+#if 0
+          codes_keys_iterator* iter = codes_keys_iterator_new(h, 0, 0);
+          while (codes_keys_iterator_next(iter)) {
+            const char* key = codes_keys_iterator_get_name(iter);
+            char value[64];
+            size_t len = 64;
+            CODES_CHECK(codes_get_string(h, key, value, &len), 0);
+            std::cout << key << ": " << value << std::endl;
+          }
+          codes_keys_iterator_delete(iter);
+#endif
+
+          // clone handle and write to output file
+          codes_handle* new_h = codes_handle_clone(h);
+
+          codes_set_long(new_h, "Nx", 10);
+          codes_set_long(new_h, "Ny", 10);
+          codes_set_long(new_h, "numberOfDataPoints", size);
+          codes_set_long(new_h, "numberOfValues", size);
+          codes_set_long(new_h, "getNumberOfValues", size);
+
+          if(bitsPerValue > 0) {
+             values.setZero();// = interp_target_fields_p->row(idx);
+
+             CODES_CHECK(codes_set_double_array(new_h, "values",
+                      values.data(), size), 0);
+          }
+
+          codes_write_message(new_h, filename_d, idx ? "a" : "w");
+          codes_handle_delete(new_h);
+
+          // delete handle
+          codes_handle_delete(h);
+          idx++;
+        }
+    }
     //
     // Partition data across MPI ranks
     //
@@ -565,12 +620,11 @@ namespace GlobalData {
 
         MatrixXd *points = nullptr, *fields = nullptr, *target_points = nullptr;
 
-#if 1
+#if 0
         generate_random_data(points, fields, target_points);
 #else
-        read_grib_file(
-           "/home/daniel/interp/rrfs.t21z.prslev.f002.conus_3km.grib2",
-            points, fields, target_points);
+        const char* filename_s = "rrfs.t21z.prslev.f002.conus_3km.grib2";
+        read_grib_file(filename_s,points, fields, target_points);
 #endif
 
         std::cout << "===== Data size ====" << std::endl
@@ -710,6 +764,7 @@ struct ClusterData {
                 interp_target_fields_p ? interp_target_fields_p->data() : nullptr, counts.data(), offsets.data(),
                 MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
+#if 0
         // print interpolated fields with associated coordinates
         // Note that the order of points is changed.
         if(mpi_rank == 0) {
@@ -718,6 +773,7 @@ struct ClusterData {
             std::cout << "===================" << std::endl;
             std::cout << interp_target_fields_p->transpose() << std::endl;
         }
+#endif
     }
     //
     // Build KD tree needed for fast nearest neighbor search
@@ -991,6 +1047,9 @@ int main(int argc, char** argv) {
 
     // Gather result from slave nodes
     parent_cluster.gather();
+
+    // Write result to a grib file
+    GlobalData::write_grib_file();
 
     //
     // Finalize MPI
