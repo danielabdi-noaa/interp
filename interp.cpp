@@ -507,19 +507,6 @@ namespace GlobalData {
 
         t.elapsed();
 
-#if 1
-        std::cout << "Writing input field for plotting" << std::endl;
-        FILE* fh = fopen("input.txt", "w");
-        for(int i = 0; i < g_numPoints; i++) {
-           fprintf(fh, "%.2f %.2f %.2f\n",
-               (*points)(0,i),
-               (*points)(1,i),
-               (*fields)(0,i));
-        }
-        fclose(fh);
-
-        t.elapsed();
-#endif
 
         // Generate random target points in the given lat/lon range
 #if 0
@@ -530,7 +517,7 @@ namespace GlobalData {
                                 2.0 * (lon_max - lon_min) + lon_min;
 #else
         std::cout << "Reading interpolation grid" << std::endl;
-        fh = fopen("grid.txt", "r");
+        FILE* fh = fopen("grid.txt", "r");
         char buffer[256];
         idx = 0;
         while(fgets(buffer, 256, fh)) {
@@ -558,8 +545,18 @@ namespace GlobalData {
 
         Timer t;
 #if 1
+        std::cout << "Writing input and output fields for plotting" << std::endl;
+        FILE* fh = fopen("input.txt", "w");
+        for(int i = 0; i < g_numPoints; i++) {
+           fprintf(fh, "%.2f %.2f %.2f\n",
+               (*points_p)(0,i),
+               (*points_p)(1,i),
+               (*fields_p)(0,i));
+        }
+        fclose(fh);
+
         std::cout << "Writing input field for plotting" << std::endl;
-        FILE* fh = fopen("output.txt", "w");
+        fh = fopen("output.txt", "w");
         for(int i = 0; i < g_numTargetPoints; i++) {
            fprintf(fh, "%.2f %.2f %.2f\n",
              (*interp_target_points_p)(0,i),
@@ -567,6 +564,7 @@ namespace GlobalData {
              (*interp_target_fields_p)(0,i));
         }
         fclose(fh);
+
         t.elapsed();
 #endif
 
