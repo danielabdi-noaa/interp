@@ -209,7 +209,7 @@ double rbf(double r_) {
     double r = (rbf_shape * r_);
 
     // gaussian
-    // return exp(-r*r);
+    return exp(-r*r);
 
     // multiquadric
     //return sqrt(1 + r*r);
@@ -227,7 +227,7 @@ double rbf(double r_) {
     //   return 0;
 
     // inverse-distance interp
-    return 1.0 / pow(r_,3);
+    // return 1.0 / pow(r_,3);
 }
 
 //
@@ -912,7 +912,7 @@ struct ClusterData {
                         for(int f = 0; f < numFields; f++)
                             target_fields(f, i) += W(j, f) * r;
                     } else
-                        sum += r;
+                        sum += std::max(r,1e-6);
                 }
                 if(non_parametric)
                 {
@@ -920,7 +920,7 @@ struct ClusterData {
                         int j = matches[k].first;
                         double r = rbf(sqrt(matches[k].second));
                         for(int f = 0; f < numFields; f++)
-                            target_fields(f, i) += fields(f, j) * (r / sum);
+                            target_fields(f, i) += fields(f, j) * (std::max(r,1e-6) / sum);
                     }
                 }
             }
@@ -942,7 +942,7 @@ struct ClusterData {
                         for(int f = 0; f < numFields; f++)
                             target_fields(f, i) += W(j, f) * r;
                     } else
-                        sum += r;
+                        sum += std::max(r,1e-6);
                 }
                 if(non_parametric)
                 {
@@ -950,7 +950,7 @@ struct ClusterData {
                         int j = indices[k];
                         double r = rbf(sqrt(distances[k]));
                         for(int f = 0; f < numFields; f++)
-                            target_fields(f, i) += fields(f, j) * (r / sum);
+                            target_fields(f, i) += fields(f, j) * (std::max(r,1e-6) / sum);
                     }
                 }
             }
