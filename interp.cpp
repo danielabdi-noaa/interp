@@ -48,6 +48,25 @@ constexpr bool non_parametric = true;
 // Number of clusters to process per MPI rank
 constexpr int numClustersPerRank = 1;
 
+/*********************
+ *  Timer class
+ *********************/
+class Timer {
+private:
+	using Clock = std::chrono::steady_clock;
+	using Second = std::chrono::duration<double, std::ratio<1> >;
+	std::chrono::time_point<Clock> m_beg { Clock::now() };
+public:
+	void reset() {
+		m_beg = Clock::now();
+	}
+	void elapsed() {
+		auto duration = std::chrono::duration_cast<Second>(Clock::now() - m_beg).count();
+        std::cout << "Finished in " << duration << " secs." << std::endl;
+        reset();
+	}
+};
+
 /***************************************************
  * Nearest neighbor search using nanoflann library
  **************************************************/
@@ -104,7 +123,7 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
         VectorXi& clusterAssignments, VectorXi& clusterSizes, MatrixXd& clusterCenters) {
 
     std::cout << "Clustering point clouds into " << numClusters << " clusters" << std::endl;
-    auto start = chrono::high_resolution_clock::now();
+    Timer t;
 
     // Initialize the cluster centers
     for (int i = 0; i < numClusters; i++) {
@@ -161,9 +180,7 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
             << clusterSizes(i) << " points" << std::endl;
     }
 
-    auto stop = chrono::high_resolution_clock::now();
-    auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-    std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
+    t.elapsed();
 }
 
 /**************************************************************
@@ -224,7 +241,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
     // Build sparse Matrix of radial basis function evaluations
     //
     std::cout << "Constructing interpolation matrix ..." << std::endl;
-    auto start = chrono::high_resolution_clock::now();
+    Timer t;
 
     typedef Eigen::Triplet<double> T;
     std::vector<T> tripletList;
@@ -272,15 +289,12 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
 
     A.setFromTriplets(tripletList.begin(), tripletList.end());
 
-    auto stop = chrono::high_resolution_clock::now();
-    auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-    std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
+    t.elapsed();
 
     //
     // LU decomposition of the interpolation matrix
     //
     std::cout << "Started factorization ..." << std::endl;
-    start = stop;
 
     solver.compute(A);
 
@@ -289,9 +303,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
         exit(0);
     }
 
-    stop = chrono::high_resolution_clock::now();
-    duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-    std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
+    t.elapsed();
 }
 
 //
@@ -300,7 +312,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
 //
 void rbf_solve(RbfSolver& solver, const VectorXd& F, VectorXd& C) {
     std::cout << "Started solve ..." << std::endl;
-    auto start = chrono::high_resolution_clock::now();
+    Timer t;
 
     C = solver.solve(F);
 
@@ -311,9 +323,7 @@ void rbf_solve(RbfSolver& solver, const VectorXd& F, VectorXd& C) {
     std::cout << "----------------------------------" << std::endl;
 #endif
 
-    auto stop = chrono::high_resolution_clock::now();
-    auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-    std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
+    t.elapsed();
 }
 
 /**************************
@@ -376,7 +386,8 @@ namespace GlobalData {
                       << "numClustersPerRank: " << numClustersPerRank << std::endl
                       << "use_cutoff_radius: " << (use_cutoff_radius ? "true" : "false") << std::endl
                       << "cutoff_radius: " << cutoff_radius << std::endl
-                      << "non_parametric: " << (non_parametric ? "true" : "false") << std::endl;
+                      << "non_parametric: " << (non_parametric ? "true" : "false") << std::endl
+                      << "=====================" << std::endl;
         }
     }
     //
@@ -441,6 +452,9 @@ namespace GlobalData {
         FILE* fp = fopen(filename, "r");
         if(!fp) return;
 
+        Timer t;
+        std::cout << "Reading input grib file" << std::endl;
+
         numFields = 0;
         while (codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret)) {
           if(numFields == 0) {
@@ -491,6 +505,8 @@ namespace GlobalData {
           idx++;
         }
 
+        t.elapsed();
+
 #if 1
         std::cout << "Writing input field for plotting" << std::endl;
         FILE* fh = fopen("input.txt", "w");
@@ -501,6 +517,8 @@ namespace GlobalData {
                (*fields)(0,i));
         }
         fclose(fh);
+
+        t.elapsed();
 #endif
 
         // Generate random target points in the given lat/lon range
@@ -522,6 +540,8 @@ namespace GlobalData {
            (*target_points)(1, idx) = lon;
            idx++;
         }
+
+        t.elapsed();
 #endif
     }
 
@@ -536,6 +556,7 @@ namespace GlobalData {
         FILE* fp_s = fopen(filename_s, "r");
         if(!fp_s) return;
 
+        Timer t;
 #if 1
         std::cout << "Writing input field for plotting" << std::endl;
         FILE* fh = fopen("output.txt", "w");
@@ -546,10 +567,10 @@ namespace GlobalData {
              (*interp_target_fields_p)(0,i));
         }
         fclose(fh);
+        t.elapsed();
 #endif
 
         std::cout << "Writing output grib file." << std::endl;
-        auto start = chrono::high_resolution_clock::now();
 
         int ret, idx = 0;
         while (codes_handle* h = codes_handle_new_from_file(0, fp_s, PRODUCT_GRIB, &ret)) {
@@ -595,9 +616,7 @@ namespace GlobalData {
           if(idx >= numFields) break;
         }
 
-        auto stop = chrono::high_resolution_clock::now();
-        auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-        std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
+        t.elapsed();
     }
     //
     // Partition data across MPI ranks
@@ -874,7 +893,7 @@ struct ClusterData {
 
         //interpolate for target fields
         std::cout << "Interpolating fields" << std::endl;
-        auto start = chrono::high_resolution_clock::now();
+        Timer t;
 
         if(use_cutoff_radius) {
             VectorXd query(numDims);
@@ -936,9 +955,8 @@ struct ClusterData {
                 }
             }
         }
-        auto stop = chrono::high_resolution_clock::now();
-        auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-        std::cout << "Finished in " << duration.count() << " millisecs." << std::endl;
+
+        t.elapsed();
     }
     //
     // Conveneince function to build and solve rbf interpolation
