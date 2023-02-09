@@ -26,23 +26,22 @@ constexpr double matrix_epsilon = 1e-5;
 // Rbf shape function can be computed approximately from
 // the average distance between points
 //     rbf_shape  = 0.8 / average_distance
-// Given npoints and numDims and [-1, 1] axis ranges
-//     average_distance = 2 / npoints^(1/numDims)
-//     rbf_shape = 0.4 * npoints^(1/numDims)
-constexpr double rbf_shape = 64;
+// If D is width of the domain
+//     rbf_shape = 0.8 / (D / npoints^(1/numDims))
+constexpr double rbf_shape = 4;
 
 // Rbf smoothing factor, often set to 0 for interpolation
 // but can be set to positive value for noisy data.
 constexpr double rbf_smoothing = 0.01;
 
 // Number of neighbors to consider for interpolation
-constexpr int numNeighbors = 8;
+constexpr int numNeighbors = 4;
 
 // Cutoff radius for nearest neighbor interpolation
 constexpr bool use_cutoff_radius = false;
 constexpr double cutoff_radius = 0.5;
 
-// Flag to set non-parameteric RBF interpolation
+// Flag to set non-parametric RBF interpolation
 constexpr bool non_parametric = true;
 
 // Number of clusters to process per MPI rank
@@ -227,7 +226,7 @@ double rbf(double r_) {
     //   return 0;
 
     // inverse-distance interp
-    // return 1.0 / pow(r_,3);
+    //return 1.0 / pow(r,3);
 }
 
 //
@@ -410,20 +409,26 @@ namespace GlobalData {
         fields = new MatrixXd(numFields, numPoints);
         target_points = new MatrixXd(numDims, numTargetPoints);
         
-        // Generate a set of random 3D points and associated field values
-        points->setRandom();
+        // Generate a set of 3D points and associated field values
+        for(int i = 0; i < n_lat_i; i++) {
+            for(int j = 0; j < n_lon_i; j++) {
+                 (*points)(0, i * n_lon_i + j) =
+                     lat_min + (i * (lat_max - lat_min))/ (n_lat_i - 1);
+                 (*points)(1, i * n_lon_i + j) =
+                     lon_min + (j * (lon_max - lon_min))/ (n_lon_i - 1);
+            }
+        }
+
+        VectorXd p(numDims);
         for (int i = 0; i < numPoints; i++) {
             for(int j = 0; j < numFields; j++) {
-                const double x = points->col(i).norm();
+                p(0) = 2 * ((*points)(0,i) - lat_min) / (lat_max - lat_min) - 1;
+                p(1) = 2 * ((*points)(1,i) - lon_min) / (lon_max - lon_min) - 1;
+                const double x = p.norm();
                 constexpr double pi = 3.14159265358979323846;
-                // wiki example function for rbf interpolation
                 (*fields)(j, i) = exp(x*cos(3*pi*x)) * (j + 1);
             }
         }
-        points->row(0) = (points->row(0).array() + 1.0) /
-                                2.0 * (lat_max - lat_min) + lat_min;
-        points->row(1) = (points->row(1).array() + 1.0) /
-                                2.0 * (lon_max - lon_min) + lon_min;
 
         // Generate random set of target points
         target_points->setRandom();
@@ -693,7 +698,7 @@ namespace GlobalData {
 
         MatrixXd *points = nullptr, *fields = nullptr, *target_points = nullptr;
 
-#if 0
+#if 1
         generate_random_data(points, fields, target_points);
 #else
         const char* filename_s = "rrfs.t21z.prslev.f002.conus_3km.grib2";
@@ -735,6 +740,10 @@ struct ClusterData {
     //
     void scatter() {
         using namespace GlobalData;
+
+        // scatter number of fields
+        MPI_Bcast(&GlobalData::numFields, 1, MPI_INT,
+                0, MPI_COMM_WORLD);
 
         // scatter number of points
         MPI_Scatter(clusterSizes.data(), 1, MPI_INT,
@@ -788,10 +797,9 @@ struct ClusterData {
                 offset += counts(i);
             }
         }
-
         MPI_Scatterv(target_points_p ? target_points_p->data() : nullptr, counts.data(), offsets.data(), MPI_DOUBLE,
                 target_points.data(), numTargetPoints * numDims, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-            
+
     }
     //
     // Gather data from slave processors
@@ -1126,7 +1134,8 @@ int main(int argc, char** argv) {
     parent_cluster.gather();
 
     // Write result to a grib file
-    GlobalData::write_grib_file();
+    if(mpi_rank == 0)
+        GlobalData::write_grib_file();
 
     //
     // Finalize MPI
