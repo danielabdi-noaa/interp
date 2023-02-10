@@ -2,6 +2,7 @@
 #include <cmath>
 #include <random>
 #include <vector>
+#include <string>
 #include <iostream>
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
@@ -333,16 +334,11 @@ namespace GlobalData {
     int numClusters;
     int mpi_rank;
     
-    //source points and fields, and target points
+    //source/target points and fields
     MatrixXd* points_p;
     MatrixXd* fields_p;
     MatrixXd* target_points_p;
-
-    //matrices for storing interpolated points and fields at targets
-    //This is needed because order of points is changed after interpolation.
-    //May need to maintain same order in the future.
-    MatrixXd* interp_target_points_p;
-    MatrixXd* interp_target_fields_p;
+    MatrixXd* target_fields_p;
 
     //cluster sizes for source and target points
     VectorXi clusterSizes;
@@ -373,8 +369,7 @@ namespace GlobalData {
         points_p = nullptr;
         fields_p = nullptr;
         target_points_p = nullptr;
-        interp_target_points_p = nullptr;
-        interp_target_fields_p = nullptr;
+        target_fields_p = nullptr;
         clusterSizes.resize(numClusters);
         target_clusterSizes.resize(numClusters);
 
@@ -442,7 +437,7 @@ namespace GlobalData {
     // Read grib file
     //
     void read_grib_file(
-          const char* filename,
+          std::string src,
           MatrixXd*& points, MatrixXd*& fields,
           MatrixXd*& target_points
     ) {
@@ -454,8 +449,11 @@ namespace GlobalData {
         const int idx_elon = 991;
 
         // Count the total number of fields in the GRIB2 file
-        FILE* fp = fopen(filename, "r");
-        if(!fp) return;
+        FILE* fp = fopen(src.c_str(), "r");
+        if(!fp) {
+            std::cout << "Input file: " << src << " not found!";
+            exit(0);
+        }
 
         Timer t;
         std::cout << "Reading input grib file" << std::endl;
@@ -540,14 +538,9 @@ namespace GlobalData {
     //
     // write grib file
     //
-    void write_grib_file() {
-        const char* filename_s = "rrfs.t21z.prslev.f002.conus_3km.grib2";
-        const char* filename_d = "out.grib2";
+    void write_grib_file(std::string src, std::string dst) {
         size_t size = g_numTargetPoints;
         VectorXd values(size);
-        FILE* fp_s = fopen(filename_s, "r");
-        if(!fp_s) return;
-
         Timer t;
 #if 1
         std::cout << "Writing input and output fields for plotting" << std::endl;
@@ -560,20 +553,24 @@ namespace GlobalData {
         }
         fclose(fh);
 
-        std::cout << "Writing input field for plotting" << std::endl;
         fh = fopen("output.txt", "w");
         for(int i = 0; i < g_numTargetPoints; i++) {
            fprintf(fh, "%.2f %.2f %.2f\n",
-             (*interp_target_points_p)(0,i),
-             (*interp_target_points_p)(1,i),
-             (*interp_target_fields_p)(0,i));
+             (*target_points_p)(0,i),
+             (*target_points_p)(1,i),
+             (*target_fields_p)(0,i));
         }
         fclose(fh);
 
         t.elapsed();
 #endif
+        if(dst.empty() || src.empty())
+          return;
 
         std::cout << "Writing output grib file." << std::endl;
+
+        FILE* fp_s = fopen(src.c_str(), "r");
+        if(!fp_s) return;
 
         int ret, idx = 0;
         while (codes_handle* h = codes_handle_new_from_file(0, fp_s, PRODUCT_GRIB, &ret)) {
@@ -603,13 +600,13 @@ namespace GlobalData {
           codes_set_long(new_h, "getNumberOfValues", size);
 
           if(bitsPerValue > 0) {
-             values = interp_target_fields_p->row(idx);
+             values = target_fields_p->row(idx);
 
              CODES_CHECK(codes_set_double_array(new_h, "values",
                       values.data(), size), 0);
           }
 
-          codes_write_message(new_h, filename_d, idx ? "a" : "w");
+          codes_write_message(new_h, dst.c_str(), idx ? "a" : "w");
           codes_handle_delete(new_h);
 
           // delete handle
@@ -678,6 +675,7 @@ namespace GlobalData {
         
         // Sort target points
         target_points_p = new MatrixXd(numDims, numTargetPoints);
+        target_fields_p = new MatrixXd(numFields, numTargetPoints);
         MatrixXd& sorted_target_points = *target_points_p;
         
         idx = 0;
@@ -694,15 +692,14 @@ namespace GlobalData {
     // Read and partition data on master node. Assumes node is big enough
     // to store and process the data.
     //
-    void read_and_partition_data() {
+    void read_and_partition_data(std::string src) {
 
         MatrixXd *points = nullptr, *fields = nullptr, *target_points = nullptr;
 
 #if 1
         generate_random_data(points, fields, target_points);
 #else
-        const char* filename_s = "rrfs.t21z.prslev.f002.conus_3km.grib2";
-        read_grib_file(filename_s,points, fields, target_points);
+        read_grib_file(src, points, fields, target_points);
 #endif
 
         std::cout << "===== Data size ====" << std::endl
@@ -812,10 +809,6 @@ struct ClusterData {
         VectorXi counts(numClusters);
     
         //Gather target points
-        interp_target_points_p = nullptr;
-        if(mpi_rank == 0)
-            interp_target_points_p = new MatrixXd(numDims, g_numTargetPoints);
-    
         if(mpi_rank == 0) {
             int offset = 0;
             for(int i = 0; i < numClusters; i++) {
@@ -825,14 +818,10 @@ struct ClusterData {
             }
         }
         MPI_Gatherv(target_points.data(), numTargetPoints * numDims, MPI_DOUBLE,
-                interp_target_points_p ? interp_target_points_p->data() : nullptr, counts.data(), offsets.data(),
+                target_points_p ? target_points_p->data() : nullptr, counts.data(), offsets.data(),
                 MPI_DOUBLE, 0, MPI_COMM_WORLD);
     
         //Gather interpolated fields
-        interp_target_fields_p = nullptr;
-        if(mpi_rank == 0)
-            interp_target_fields_p = new MatrixXd(numFields, g_numTargetPoints);
-    
         if(mpi_rank == 0) {
             int offset = 0;
             for(int i = 0; i < numClusters; i++) {
@@ -842,7 +831,7 @@ struct ClusterData {
             }
         }
         MPI_Gatherv(target_fields.data(), numTargetPoints * numFields, MPI_DOUBLE,
-                interp_target_fields_p ? interp_target_fields_p->data() : nullptr, counts.data(), offsets.data(),
+                target_fields_p ? target_fields_p->data() : nullptr, counts.data(), offsets.data(),
                 MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
 #if 0
@@ -850,9 +839,9 @@ struct ClusterData {
         // Note that the order of points is changed.
         if(mpi_rank == 0) {
             std::cout << "===================" << std::endl;
-            std::cout << interp_target_points_p->transpose() << std::endl;
+            std::cout << target_points_p->transpose() << std::endl;
             std::cout << "===================" << std::endl;
-            std::cout << interp_target_fields_p->transpose() << std::endl;
+            std::cout << target_fields_p->transpose() << std::endl;
         }
 #endif
     }
@@ -1080,6 +1069,14 @@ void merge_cluster(ClusterData& parent, int numClusters,
  * Test driver
  *****************/
 
+void usage() {
+    std::cout << "usage: ./interp [-h] --src SRC --dst DST" << std::endl << std::endl
+              << "Interpolate fields in a grib2 file onto another grid or scattered obs locations." << std::endl << std::endl
+              << "arguments:" << std::endl
+              << "  -h, --help   show this help message and exit" << std::endl
+              << "  -s, --src    grib file containing fields to interpolate" << std::endl
+              << "  -d, --des    destination grib file containing the grid" << std::endl;
+}
 int main(int argc, char** argv) {
 
     // Initialize MPI
@@ -1089,12 +1086,30 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 
     //
+    // Process command line options
+    //
+    std::string src, dst;
+    if(mpi_rank == 0) {
+        std::vector<std::string> args(argv + 1, argv + argc);
+        for (auto it = args.begin(); it != args.end(); ++it) {
+            if(*it == "-h" || *it == "--help") {
+                usage();
+                exit(0);
+            } else if(*it == "-s" || *it == "--src") {
+                src = *++it;
+            } else if(*it == "-d" || *it == "--dst") {
+                dst = *++it;
+            }
+        }
+    }
+
+    //
     // Cluster and decompose data
     //
 
     GlobalData::init(nprocs, mpi_rank);
     if(mpi_rank == 0)
-        GlobalData::read_and_partition_data();
+        GlobalData::read_and_partition_data(src);
 
     //
     // Each rank gets one cluster that it solves independently of other ranks
@@ -1135,7 +1150,7 @@ int main(int argc, char** argv) {
 
     // Write result to a grib file
     if(mpi_rank == 0)
-        GlobalData::write_grib_file();
+        GlobalData::write_grib_file(src, dst);
 
     //
     // Finalize MPI
