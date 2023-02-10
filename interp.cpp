@@ -407,18 +407,18 @@ namespace GlobalData {
         // Generate a set of 3D points and associated field values
         for(int i = 0; i < n_lat_i; i++) {
             for(int j = 0; j < n_lon_i; j++) {
-                 (*points)(0, i * n_lon_i + j) =
-                     lat_min + (i * (lat_max - lat_min))/ (n_lat_i - 1);
-                 (*points)(1, i * n_lon_i + j) =
-                     lon_min + (j * (lon_max - lon_min))/ (n_lon_i - 1);
+                (*points)(0, i * n_lon_i + j) =
+                    lon_min + (j * (lon_max - lon_min))/ (n_lon_i - 1);
+                (*points)(1, i * n_lon_i + j) =
+                    lat_min + (i * (lat_max - lat_min))/ (n_lat_i - 1);
             }
         }
 
         VectorXd p(numDims);
         for (int i = 0; i < numPoints; i++) {
             for(int j = 0; j < numFields; j++) {
-                p(0) = 2 * ((*points)(0,i) - lat_min) / (lat_max - lat_min) - 1;
-                p(1) = 2 * ((*points)(1,i) - lon_min) / (lon_max - lon_min) - 1;
+                p(0) = 2 * ((*points)(0,i) - lon_min) / (lon_max - lon_min) - 1;
+                p(1) = 2 * ((*points)(1,i) - lat_min) / (lat_max - lat_min) - 1;
                 const double x = p.norm();
                 constexpr double pi = 3.14159265358979323846;
                 (*fields)(j, i) = exp(x*cos(3*pi*x)) * (j + 1);
@@ -426,11 +426,22 @@ namespace GlobalData {
         }
 
         // Generate random set of target points
+#if 0
+        for(int i = 0; i < n_lat_o; i++) {
+            for(int j = 0; j < n_lon_o; j++) {
+                 (*target_points)(0, i * n_lon_o + j) =
+                     lon_min + (j * (lon_max - lon_min))/ (n_lon_o - 1);
+                 (*target_points)(1, i * n_lon_o + j) =
+                     lat_min + (i * (lat_max - lat_min))/ (n_lat_o - 1);
+            }
+        }
+#else
         target_points->setRandom();
-        target_points->row(0) = (target_points->row(0).array() + 1.0) /
-                                2.0 * (lat_max - lat_min) + lat_min;
-        target_points->row(1) = (target_points->row(1).array() + 1.0) /
+        target_points->row(0) = (target_points->row(1).array() + 1.0) /
                                 2.0 * (lon_max - lon_min) + lon_min;
+        target_points->row(1) = (target_points->row(0).array() + 1.0) /
+                                2.0 * (lat_max - lat_min) + lat_min;
+#endif
     }
 
     //
@@ -496,12 +507,12 @@ namespace GlobalData {
             CODES_CHECK(codes_get_double_array(h, "values",
                         values.data(), &numPoints), 0);
 
-            points->row(0) = values;
+            points->row(1) = values;
           } else if(idx == idx_elon) {
             CODES_CHECK(codes_get_double_array(h, "values",
                         values.data(), &numPoints), 0);
 
-            points->row(1) = values;
+            points->row(2) = values;
           }
 
           codes_handle_delete(h);
@@ -514,10 +525,10 @@ namespace GlobalData {
         // Generate random target points in the given lat/lon range
 #if 0
         target_points->setRandom();
-        target_points->row(0) = (target_points->row(0).array() + 1.0) /
-                                2.0 * (lat_max - lat_min) + lat_min;
-        target_points->row(1) = (target_points->row(1).array() + 1.0) /
+        target_points->row(0) = (target_points->row(1).array() + 1.0) /
                                 2.0 * (lon_max - lon_min) + lon_min;
+        target_points->row(1) = (target_points->row(0).array() + 1.0) /
+                                2.0 * (lat_max - lat_min) + lat_min;
 #else
         std::cout << "Reading interpolation grid" << std::endl;
         FILE* fh = fopen("grid.txt", "r");
@@ -526,8 +537,8 @@ namespace GlobalData {
         while(fgets(buffer, 256, fh)) {
            float lat,lon;
            sscanf(buffer, "%f %f", &lat, &lon);
-           (*target_points)(0, idx) = lat;
-           (*target_points)(1, idx) = lon;
+           (*target_points)(0, idx) = lon;
+           (*target_points)(1, idx) = lat;
            idx++;
         }
 
