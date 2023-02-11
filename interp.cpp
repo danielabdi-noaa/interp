@@ -29,14 +29,14 @@ constexpr double matrix_epsilon = 1e-5;
 //     rbf_shape  = 0.8 / average_distance
 // If D is width of the domain
 //     rbf_shape = 0.8 / (D / npoints^(1/numDims))
-constexpr double rbf_shape = 4;
+constexpr double rbf_shape = 51;
 
 // Rbf smoothing factor, often set to 0 for interpolation
 // but can be set to positive value for noisy data.
 constexpr double rbf_smoothing = 0.01;
 
 // Number of neighbors to consider for interpolation
-constexpr int numNeighbors = 4;
+constexpr int numNeighbors = 32;
 
 // Cutoff radius for nearest neighbor interpolation
 constexpr bool use_cutoff_radius = false;
@@ -419,14 +419,14 @@ namespace GlobalData {
             for(int j = 0; j < numFields; j++) {
                 p(0) = 2 * ((*points)(0,i) - lon_min) / (lon_max - lon_min) - 1;
                 p(1) = 2 * ((*points)(1,i) - lat_min) / (lat_max - lat_min) - 1;
-                const double x = p.norm();
+                const double x = p(0), y = p(1);
                 constexpr double pi = 3.14159265358979323846;
-                (*fields)(j, i) = exp(x*cos(3*pi*x)) * (j + 1);
+                (*fields)(j, i) = sqrt( exp(x*cos(3*pi*x)) * exp(y*cos(3*pi*y)) )* (j + 1);
             }
         }
 
         // Generate random set of target points
-#if 0
+#if 1
         for(int i = 0; i < n_lat_o; i++) {
             for(int j = 0; j < n_lon_o; j++) {
                  (*target_points)(0, i * n_lon_o + j) =
