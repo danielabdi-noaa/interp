@@ -22,25 +22,25 @@ using namespace Eigen;
 constexpr int numDims = 2;
 
 // matrix coefficients below this value are zeroed (pruned)
-constexpr double matrix_epsilon = 1e-5;
+constexpr double matrix_epsilon = 0.0;
 
 // Rbf shape function can be computed approximately from
 // the average distance between points
 //     rbf_shape  = 0.8 / average_distance
 // If D is width of the domain
 //     rbf_shape = 0.8 / (D / npoints^(1/numDims))
-constexpr double rbf_shape = 51;
+constexpr double rbf_shape = 48.98; //1.85=40; //48.98=1059;
 
 // Rbf smoothing factor, often set to 0 for interpolation
 // but can be set to positive value for noisy data.
-constexpr double rbf_smoothing = 0.01;
+constexpr double rbf_smoothing = 0.0;
 
 // Number of neighbors to consider for interpolation
 constexpr int numNeighbors = 32;
 
 // Cutoff radius for nearest neighbor interpolation
 constexpr bool use_cutoff_radius = false;
-constexpr double cutoff_radius = 0.5;
+constexpr double cutoff_radius = 4 * (0.8 / rbf_shape);
 
 // Flag to set non-parametric RBF interpolation
 constexpr bool non_parametric = true;
