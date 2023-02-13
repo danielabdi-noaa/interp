@@ -43,7 +43,7 @@ constexpr bool use_cutoff_radius = false;
 constexpr double cutoff_radius = 4 * (0.8 / rbf_shape);
 
 // Flag to set non-parametric RBF interpolation
-constexpr bool non_parametric = true;
+constexpr bool non_parametric = false;
 
 // Number of clusters to process per MPI rank
 constexpr int numClustersPerRank = 1;
@@ -135,7 +135,7 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
 
     // Perform k-means clustering until the cluster assignments stop changing
     MatrixXd sumClusterCenters(numDims, numClusters);
-    VectorXd d(3);
+    VectorXd d(numDims);
 
     bool converged = false;
     while (!converged) {
@@ -359,6 +359,9 @@ namespace GlobalData {
     VectorXi clusterSizes;
     VectorXi target_clusterSizes;
 
+    //cluster center for source points
+    MatrixXd clusterCenters;
+
     //parameters
     int g_numPoints;
     int g_numTargetPoints;
@@ -387,6 +390,7 @@ namespace GlobalData {
         target_fields_p = nullptr;
         clusterSizes.resize(numClusters);
         target_clusterSizes.resize(numClusters);
+        clusterCenters.resize(numDims,numClusters);
 
         if(mpi_rank == 0) {
             std::cout << "===== Parameters ====" << std::endl
@@ -655,7 +659,6 @@ namespace GlobalData {
 
         // Partition the source points into N clusters
         VectorXi clusterAssignments(numPoints);
-        MatrixXd clusterCenters(numDims,numClusters);
         
         clusterAssignments.setZero();
         kMeansClustering(points, numPoints, numClusters,
@@ -753,6 +756,7 @@ struct ClusterData {
     MatrixXd fields;
     MatrixXd target_points;
     MatrixXd target_fields;
+    VectorXd center;
     PointCloud* cloud;
     KDTree* ptree;
     SparseMatrix<double> A;
@@ -767,6 +771,11 @@ struct ClusterData {
         // scatter number of fields
         MPI_Bcast(&GlobalData::numFields, 1, MPI_INT,
                 0, MPI_COMM_WORLD);
+
+        // scatter cluster centers
+        center.resize(numDims);
+        MPI_Scatter(clusterCenters.data(), numDims, MPI_DOUBLE,
+                center.data(), numDims, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
         // scatter number of points
         MPI_Scatter(clusterSizes.data(), 1, MPI_INT,
@@ -901,8 +910,10 @@ struct ClusterData {
 
         std::cout << "===========================" << std::endl;
 
-        //compute weights for each field
+        VectorXd d(numDims);
+        double avg_radius = 0;
         if(!non_parametric) {
+            //compute weights for each field
             VectorXd Wf(numPoints+degree);
             std::cout << "Computing weights for all fields" << std::endl;
             F.setZero();
@@ -912,6 +923,12 @@ struct ClusterData {
                 rbf_solve(solver, F, Wf);
                 W.col(f) = Wf;
             }
+            //compute average radius of cluster for weighing purposes
+            for(int i = 0; i < numPoints; i++) {
+                d = points.col(i) - center;
+                avg_radius += sqrt(d.dot(d));
+            }
+            avg_radius /= numPoints;
         }
 
         //interpolate for target fields
@@ -926,29 +943,46 @@ struct ClusterData {
                 query = target_points.col(i);
                 unsigned nMatches = knn_radius(*ptree, cutoff_radius, query.data(), matches);
 
+                // compute blending factor
+                d = target_points.col(i) - center;
+                double radius = sqrt(d.dot(d));
+                constexpr double r_max = 1.2, r_min = 0.5;
+                double blend;
+                if(radius > r_max * avg_radius)
+                    blend = 0;
+                else if(radius < r_min * avg_radius)
+                    blend = 1;
+                else
+                    blend = (r_max * avg_radius - radius) / ((r_max - r_min) * avg_radius);
+
                 // interpolate
                 double sum = 0;
                 for (int k = 0; k < nMatches; k++) {
                     int j = matches[k].first;
                     double r = rbf(sqrt(matches[k].second));
-                    if(!non_parametric) {
+                    sum += std::max(r,1e-6);
+
+                    if(!non_parametric && (blend > 0)) {
                         for(int f = 0; f < numFields; f++)
                             target_fields(f, i) += W(j, f) * r;
-                    } else
-                        sum += std::max(r,1e-6);
+                        if(k == 0) {
+                            for (int j = 0; j < degree; j++)
+                                for(int f = 0; f < numFields; f++)
+                                    target_fields(f, i) += W(numPoints + j, f);
+                        }
+                    }
+
                 }
-                if(non_parametric)
-                {
+                target_fields.col(i) *= blend;
+                sum /= (1 - blend);
+
+                // add non-parameteric interp
+                if(non_parametric || (blend < 1)) {
                     for (int k = 0; k < nMatches; k++) {
                         int j = matches[k].first;
                         double r = rbf(sqrt(matches[k].second));
                         for(int f = 0; f < numFields; f++)
                             target_fields(f, i) += fields(f, j) * (std::max(r,1e-6) / sum);
-                    }
-                } else {
-                    for (int j = 0; j < degree; j++) {
-                        for(int f = 0; f < numFields; f++)
-                            target_fields(f, i) += W(numPoints + j, f);
                     }
                 }
             }
@@ -961,29 +995,46 @@ struct ClusterData {
                 query = target_points.col(i);
                 knn(*ptree, numNeighbors, query.data(), &indices[0], &distances[0]);
 
+                // compute blending factor
+                d = target_points.col(i) - center;
+                double radius = sqrt(d.dot(d));
+                constexpr double r_max = 1.2, r_min = 0.5;
+                double blend;
+                if(radius > r_max * avg_radius)
+                    blend = 0;
+                else if(radius < r_min * avg_radius)
+                    blend = 1;
+                else
+                    blend = (r_max * avg_radius - radius) / ((r_max - r_min) * avg_radius);
+
                 // interpolate
                 double sum = 0;
                 for (int k = 0; k < numNeighbors; k++) {
                     int j = indices[k];
                     double r = rbf(sqrt(distances[k]));
-                    if(!non_parametric) {
+                    sum += std::max(r,1e-6);
+
+                    if(!non_parametric && (blend > 0)) {
                         for(int f = 0; f < numFields; f++)
                             target_fields(f, i) += W(j, f) * r;
-                    } else
-                        sum += std::max(r,1e-6);
+                        if(k == 0) {
+                            for (int j = 0; j < degree; j++)
+                                for(int f = 0; f < numFields; f++)
+                                    target_fields(f, i) += W(numPoints + j, f);
+                        }
+                    }
+
                 }
-                if(non_parametric)
-                {
+                target_fields.col(i) *= blend;
+                sum /= (1 - blend);
+
+                // add non-parameteric interp
+                if(non_parametric || (blend < 1)) {
                     for (int k = 0; k < numNeighbors; k++) {
                         int j = indices[k];
                         double r = rbf(sqrt(distances[k]));
                         for(int f = 0; f < numFields; f++)
                             target_fields(f, i) += fields(f, j) * (std::max(r,1e-6) / sum);
-                    }
-                } else {
-                    for (int j = 0; j < degree; j++) {
-                        for(int f = 0; f < numFields; f++)
-                            target_fields(f, i) += W(numPoints + j, f);
                     }
                 }
             }
@@ -1027,6 +1078,7 @@ void split_cluster(const ClusterData& parent, int numClusters,
     for(int i = 0; i < numClusters; i++) {
         ClusterData& cd = subclusters[i];
         cd.numPoints = clusterSizes(i);
+        cd.center = clusterCenters.col(i);
         cd.points.resize(numDims, cd.numPoints);
         cd.fields.resize(numFields, cd.numPoints);
     }
@@ -1045,7 +1097,7 @@ void split_cluster(const ClusterData& parent, int numClusters,
     }
 
     // Partition target points
-    VectorXd d(3);
+    VectorXd d(numDims);
     target_clusterSizes.setZero(numClusters);
     for(int i = 0; i < parent.numTargetPoints; i++) {
         int closestCluster = -1;
