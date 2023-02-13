@@ -48,6 +48,9 @@ constexpr bool non_parametric = true;
 // Number of clusters to process per MPI rank
 constexpr int numClustersPerRank = 1;
 
+// Polynomial degree
+constexpr int degree = 0;
+
 /*********************
  *  Timer class
  *********************/
@@ -245,7 +248,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
 
     typedef Eigen::Triplet<double> T;
     std::vector<T> tripletList;
-    tripletList.reserve(numPoints * numNeighbors);
+    tripletList.reserve(numPoints * numNeighbors + 2 * degree * numPoints);
 
     VectorXd query(numDims);
 
@@ -265,6 +268,12 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
                 if(fabs(r) > matrix_epsilon)
                     tripletList.push_back(T(i,j,r));
             }
+
+            // Add polynomial
+            for(int j = 0; j < degree; j++) {
+                tripletList.push_back(T(i,numPoints + j,1));
+                tripletList.push_back(T(numPoints + j,i,1));
+            }
         }
     } else {
         vector<size_t> indices(numNeighbors);
@@ -283,6 +292,12 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
                     r += rbf_smoothing;
                 if(fabs(r) > matrix_epsilon)
                     tripletList.push_back(T(i,j,r));
+            }
+
+            // Add polynomial
+            for(int j = 0; j < degree; j++) {
+                tripletList.push_back(T(i,numPoints + j,1));
+                tripletList.push_back(T(numPoints + j,i,1));
             }
         }
     }
@@ -871,7 +886,7 @@ struct ClusterData {
     void build_rbf() {
         if(non_parametric)
             return;
-        A.resize(numPoints, numPoints);
+        A.resize(numPoints + degree, numPoints + degree);
         rbf_build(*ptree, points, numPoints, solver, A);
     }
     //
@@ -879,8 +894,8 @@ struct ClusterData {
     //
     void solve_rbf() {
         using namespace GlobalData;
-        VectorXd F(numPoints);
-        MatrixXd W(numPoints, numFields);
+        VectorXd F(numPoints+degree);
+        MatrixXd W(numPoints+degree, numFields);
 
         target_fields.setZero();
 
@@ -888,10 +903,12 @@ struct ClusterData {
 
         //compute weights for each field
         if(!non_parametric) {
-            VectorXd Wf(numPoints);
+            VectorXd Wf(numPoints+degree);
             std::cout << "Computing weights for all fields" << std::endl;
+            F.setZero();
+            Wf.setZero();
             for(int f = 0; f < numFields; f++) {
-                F = fields.row(f);
+                F.segment(0,numPoints) = fields.row(f);
                 rbf_solve(solver, F, Wf);
                 W.col(f) = Wf;
             }
@@ -928,6 +945,11 @@ struct ClusterData {
                         for(int f = 0; f < numFields; f++)
                             target_fields(f, i) += fields(f, j) * (std::max(r,1e-6) / sum);
                     }
+                } else {
+                    for (int j = 0; j < degree; j++) {
+                        for(int f = 0; f < numFields; f++)
+                            target_fields(f, i) += W(numPoints + j, f);
+                    }
                 }
             }
         } else {
@@ -957,6 +979,11 @@ struct ClusterData {
                         double r = rbf(sqrt(distances[k]));
                         for(int f = 0; f < numFields; f++)
                             target_fields(f, i) += fields(f, j) * (std::max(r,1e-6) / sum);
+                    }
+                } else {
+                    for (int j = 0; j < degree; j++) {
+                        for(int f = 0; f < numFields; f++)
+                            target_fields(f, i) += W(numPoints + j, f);
                     }
                 }
             }
