@@ -43,7 +43,7 @@ constexpr bool use_cutoff_radius = false;
 constexpr double cutoff_radius = 4 * (0.8 / rbf_shape);
 
 // Flag to set non-parametric RBF interpolation
-constexpr bool non_parametric = false;
+constexpr bool non_parametric = true;
 
 // Number of clusters to process per MPI rank
 constexpr int numClustersPerRank = 1;
@@ -427,9 +427,9 @@ namespace GlobalData {
         for(int i = 0; i < n_lat_i; i++) {
             for(int j = 0; j < n_lon_i; j++) {
                 (*points)(0, i * n_lon_i + j) =
-                    lon_min + (j * (lon_max - lon_min))/ (n_lon_i - 1);
+                    lon_min + (j * (lon_max - lon_min)) / (n_lon_i - 1);
                 (*points)(1, i * n_lon_i + j) =
-                    lat_min + (i * (lat_max - lat_min))/ (n_lat_i - 1);
+                    lat_min + (i * (lat_max - lat_min)) / (n_lat_i - 1);
             }
         }
 
@@ -531,7 +531,7 @@ namespace GlobalData {
             CODES_CHECK(codes_get_double_array(h, "values",
                         values.data(), &numPoints), 0);
 
-            points->row(2) = values;
+            points->row(0) = values;
           }
 
           codes_handle_delete(h);
