@@ -52,6 +52,22 @@ constexpr int numClustersPerRank = 1;
 constexpr int degree = 0;
 
 /*********************
+ *  Grid lat/long
+ *********************/
+// lat/lon boundaries, use offest to account
+// for curved lambert-conformal conic grid
+constexpr double lat_min = 21.14 + 10;
+constexpr double lat_max = 52.63 - 10;
+constexpr double lon_min = 225.9 + 10;
+constexpr double lon_max = 299.1 - 10;
+
+// input/output grid dimensions
+const int n_lon_i = 1799;
+const int n_lat_i = 1059;
+const int n_lon_o = 3300; //7000;
+const int n_lat_o = 2000; //3500;
+
+/*********************
  *  Timer class
  *********************/
 class Timer {
@@ -129,8 +145,15 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
     Timer t;
 
     // Initialize the cluster centers
+    double lat_c = (lat_min + lat_max) / 2;
+    double lon_d = (lon_max - lon_min) / numClusters;
     for (int i = 0; i < numClusters; i++) {
-        clusterCenters.col(i) = points.col(i);
+#if 0
+        clusterCenters.col(i) = points.col(rand() % numPoints);
+#else
+        clusterCenters(0,i) = lon_min + (lon_d / 2) + i * lon_d; 
+        clusterCenters(1,i) = lat_c;
+#endif
     }
 
     // Perform k-means clustering until the cluster assignments stop changing
@@ -142,6 +165,7 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
 
         // Update the cluster assignments
         converged = true;
+#pragma omp parallel for private(d)
         for (int i = 0; i < numPoints; i++) {
             int closestCluster = -1;
             double minDistance = std::numeric_limits<double>::max();
@@ -163,16 +187,15 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
         // Update the cluster centers
         sumClusterCenters.setZero(numDims,numClusters);
         clusterSizes.setZero(numClusters);
-
+#pragma omp paralle for reduction(+:sumClusterCenters,clusterSizes)
         for (int i = 0; i < numPoints; i++) {
             int cluster = clusterAssignments(i);
             sumClusterCenters.col(cluster) += points.col(i);
             clusterSizes(cluster)++;
         }
         for (int i = 0; i < numClusters; i++) {
-            if (clusterSizes(i) > 0) {
+            if (clusterSizes(i) > 0)
                 clusterCenters.col(i) = sumClusterCenters.col(i) / clusterSizes(i);
-            }
         }
     }
 
@@ -366,19 +389,6 @@ namespace GlobalData {
     int g_numPoints;
     int g_numTargetPoints;
     int numFields;
-
-    // lat/lon boundaries, use offest to account
-    // for curved HRRR grid
-    const double lat_min = 21.14 + 10;
-    const double lat_max = 52.63 - 10;
-    const double lon_min = 225.9 + 10;
-    const double lon_max = 299.1 - 10;
-
-    // input/output grid dimensions
-    const int n_lon_i = 1799;
-    const int n_lat_i = 1059;
-    const int n_lon_o = 7000;
-    const int n_lat_o = 3500;
 
     //initialize global params
     void init(int nc, int r) {
@@ -1216,6 +1226,7 @@ int main(int argc, char** argv) {
                       child_clusters, target_clusterAssignments);
 
         //solve mini-clusters independently
+#pragma omp parallel for
         for(int i = 0; i < numClustersPerRank; i++)
             child_clusters[i].build_and_solve();
 
