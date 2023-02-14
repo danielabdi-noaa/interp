@@ -868,17 +868,6 @@ struct ClusterData {
         MPI_Gatherv(target_fields.data(), numTargetPoints * numFields, MPI_DOUBLE,
                 target_fields_p ? target_fields_p->data() : nullptr, counts.data(), offsets.data(),
                 MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
-#if 0
-        // print interpolated fields with associated coordinates
-        // Note that the order of points is changed.
-        if(mpi_rank == 0) {
-            std::cout << "===================" << std::endl;
-            std::cout << target_points_p->transpose() << std::endl;
-            std::cout << "===================" << std::endl;
-            std::cout << target_fields_p->transpose() << std::endl;
-        }
-#endif
     }
     //
     // Build KD tree needed for fast nearest neighbor search
@@ -1150,7 +1139,7 @@ void merge_cluster(ClusterData& parent, int numClusters,
 
         const ClusterData& cd = subclusters[owner];
         for(int f = 0; f < numFields; f++)
-            parent.target_fields(f,i) = cd.fields(f,idx);
+            parent.target_fields(f,i) = cd.target_fields(f,idx);
         target_cidx[owner]++;
     } 
 }
