@@ -62,10 +62,10 @@ constexpr double lon_min = 225.9 + 10;
 constexpr double lon_max = 299.1 - 10;
 
 // input/output grid dimensions
-const int n_lon_i = 1799;
-const int n_lat_i = 1059;
-const int n_lon_o = 7000;
-const int n_lat_o = 3500;
+constexpr int n_lon_i = 1799;
+constexpr int n_lat_i = 1059;
+constexpr int n_lon_o = 3300; //7000;
+constexpr int n_lat_o = 2000; //3500;
 
 /*********************
  *  Timer class
@@ -145,16 +145,23 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
     Timer t;
 
     // Initialize the cluster centers
-    double lat_c = (lat_min + lat_max) / 2;
-    double lon_d = (lon_max - lon_min) / numClusters;
-    for (int i = 0; i < numClusters; i++) {
 #if 0
+    for (int i = 0; i < numClusters; i++) {
         clusterCenters.col(i) = points.col(rand() % numPoints);
-#else
-        clusterCenters(0,i) = lon_min + (lon_d / 2) + i * lon_d; 
-        clusterCenters(1,i) = lat_c;
-#endif
     }
+#else
+    const int n_lat = 1;
+    const int n_lon = (numClusters / n_lat);
+    double lat_d = (lat_max - lat_min) / n_lat;
+    double lon_d = (lon_max - lon_min) / n_lon;
+
+    for (int i = 0; i < n_lat; i++) {
+        for (int j = 0; j < n_lon; j++) {
+            clusterCenters(0,i * n_lon + j) = lon_min + (lon_d / 2) + j * lon_d;
+            clusterCenters(1,i * n_lon + j) = lat_min + (lat_d / 2) + i * lat_d;
+        }
+    }
+#endif
 
     // Perform k-means clustering until the cluster assignments stop changing
     MatrixXd sumClusterCenters(numDims, numClusters);
@@ -418,10 +425,11 @@ namespace GlobalData {
     //
     void read_target_points(MatrixXd*& target_points, std::string tmpl) {
         Timer t;
-        g_numTargetPoints = n_lat_o*n_lon_o;
-        target_points = new MatrixXd(numDims, g_numTargetPoints);
 #if 1
         std::cout << "Creating interpolation grid" << std::endl;
+        g_numTargetPoints = n_lat_o*n_lon_o;
+        target_points = new MatrixXd(numDims, g_numTargetPoints);
+
         for(int i = 0; i < n_lat_o; i++) {
             for(int j = 0; j < n_lon_o; j++) {
                  (*target_points)(0, i * n_lon_o + j) =
@@ -432,6 +440,9 @@ namespace GlobalData {
         }
 #elif 0
         std::cout << "Creating random interpolation grid" << std::endl;
+        g_numTargetPoints = n_lat_o*n_lon_o;
+        target_points = new MatrixXd(numDims, g_numTargetPoints);
+
         target_points->setRandom();
         target_points->row(0) = (target_points->row(1).array() + 1.0) /
                                 2.0 * (lon_max - lon_min) + lon_min;
@@ -442,17 +453,28 @@ namespace GlobalData {
         FILE* fp_s = fopen(tmpl.c_str(), "r");
         if(!fp_s) return;
         int ret;
+        long numTargetPoints;
+
+        codes_handle* h = codes_handle_new_from_file(0, fp_s, PRODUCT_GRIB, &ret);
+
+        CODES_CHECK(codes_get_long(h, "numberOfPoints", &numTargetPoints), 0);
+        g_numTargetPoints = numTargetPoints;
+        target_points = new MatrixXd(numDims, g_numTargetPoints);
+
         VectorXd lons, lats, values;
         lons.resize(g_numTargetPoints);
         lats.resize(g_numTargetPoints);
         values.resize(g_numTargetPoints);
-        codes_handle* h = codes_handle_new_from_file(0, fp_s, PRODUCT_GRIB, &ret);
         CODES_CHECK(codes_grib_get_data(h, lats.data(), lons.data(), values.data()), 0);
         target_points->row(0) = lons;
         target_points->row(1) = lats;
+
         codes_handle_delete(h);
 #else
         std::cout << "Reading interpolation grid from text file" << std::endl;
+        g_numTargetPoints = n_lat_o*n_lon_o;
+        target_points = new MatrixXd(numDims, g_numTargetPoints);
+
         FILE* fh = fopen("mrms.txt", "r");
         char buffer[256];
         int idx = 0;
@@ -512,14 +534,12 @@ namespace GlobalData {
           std::string src,
           MatrixXd*& points, MatrixXd*& fields
     ) {
-        int ret;
-        size_t numPoints;
+        // Hard code longitude and latitude index
+        constexpr int idx_nlat = 990;
+        constexpr int idx_elon = 991;
+        constexpr int idx_fields[] = {0, 301};
 
-        //hard code longitude and latitude index
-        const int idx_nlat = 990;
-        const int idx_elon = 991;
-
-        // Count the total number of fields in the GRIB2 file
+        // Get the number of points
         FILE* fp = fopen(src.c_str(), "r");
         if(!fp) {
             std::cout << "Input file: " << src << " not found!";
@@ -527,22 +547,17 @@ namespace GlobalData {
         }
 
         Timer t;
+        size_t numPoints;
+        int ret;
+
         std::cout << "Reading input grib file" << std::endl;
-
-        numFields = 0;
-        while (codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret)) {
-          if(numFields == 0) {
-              CODES_CHECK(codes_get_size(h, "values", &numPoints), 0);
-          }
+        numFields = sizeof(idx_fields) / sizeof(int);
+        {
+          codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret);
+          CODES_CHECK(codes_get_size(h, "values", &numPoints), 0);
           codes_handle_delete(h);
-          ++numFields;
+          rewind(fp);
         }
-        rewind(fp);
-
-        // set these values just for testing
-        numFields = 1;
-
-        // Save global number of points
         g_numPoints = numPoints;
 
         // Allocate
@@ -554,7 +569,7 @@ namespace GlobalData {
         int idx = 0, f = 0;
         while (codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret)) {
 
-          if(idx < numFields) {
+          if(f < numFields && idx == idx_fields[f]) {
             CODES_CHECK(codes_get_double_array(h, "values",
                         values.data(), &numPoints), 0);
 
@@ -590,19 +605,23 @@ namespace GlobalData {
         std::cout << "Writing input and output fields for plotting" << std::endl;
         FILE* fh = fopen("input.txt", "w");
         for(int i = 0; i < g_numPoints; i++) {
-           fprintf(fh, "%.2f %.2f %.2f\n",
+           fprintf(fh, "%.2f %.2f ",
                (*points_p)(0,i),
-               (*points_p)(1,i),
-               (*fields_p)(0,i));
+               (*points_p)(1,i));
+           for(int j = 0; j < numFields; j++)
+               fprintf(fh, "%.2f ", (*fields_p)(j,i));
+           fprintf(fh, "\n");
         }
         fclose(fh);
 
         fh = fopen("output.txt", "w");
         for(int i = 0; i < g_numTargetPoints; i++) {
-           fprintf(fh, "%.2f %.2f %.2f\n",
+           fprintf(fh, "%.2f %.2f ",
              (*target_points_p)(0,i),
-             (*target_points_p)(1,i),
-             (*target_fields_p)(0,i));
+             (*target_points_p)(1,i));
+           for(int j = 0; j < numFields; j++)
+               fprintf(fh, "%.2f ", (*target_fields_p)(j,i));
+           fprintf(fh, "\n");
         }
         fclose(fh);
 #else
