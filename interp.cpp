@@ -64,8 +64,8 @@ constexpr double lon_max = 299.1 - 10;
 // input/output grid dimensions
 const int n_lon_i = 1799;
 const int n_lat_i = 1059;
-const int n_lon_o = 3300; //7000;
-const int n_lat_o = 2000; //3500;
+const int n_lon_o = 7000;
+const int n_lat_o = 3500;
 
 /*********************
  *  Timer class
@@ -416,8 +416,12 @@ namespace GlobalData {
     //
     //read/generate target interpolation points
     //
-    void read_target_points(MatrixXd*& target_points) {
+    void read_target_points(MatrixXd*& target_points, std::string tmpl) {
+        Timer t;
+        g_numTargetPoints = n_lat_o*n_lon_o;
+        target_points = new MatrixXd(numDims, g_numTargetPoints);
 #if 1
+        std::cout << "Creating interpolation grid" << std::endl;
         for(int i = 0; i < n_lat_o; i++) {
             for(int j = 0; j < n_lon_o; j++) {
                  (*target_points)(0, i * n_lon_o + j) =
@@ -427,49 +431,57 @@ namespace GlobalData {
             }
         }
 #elif 0
+        std::cout << "Creating random interpolation grid" << std::endl;
         target_points->setRandom();
         target_points->row(0) = (target_points->row(1).array() + 1.0) /
                                 2.0 * (lon_max - lon_min) + lon_min;
         target_points->row(1) = (target_points->row(0).array() + 1.0) /
                                 2.0 * (lat_max - lat_min) + lat_min;
+#elif 0
+        std::cout << "Reading interpolation grid from grib file" << std::endl;
+        FILE* fp_s = fopen(tmpl.c_str(), "r");
+        if(!fp_s) return;
+        int ret;
+        VectorXd lons, lats, values;
+        lons.resize(g_numTargetPoints);
+        lats.resize(g_numTargetPoints);
+        values.resize(g_numTargetPoints);
+        codes_handle* h = codes_handle_new_from_file(0, fp_s, PRODUCT_GRIB, &ret);
+        CODES_CHECK(codes_grib_get_data(h, lats.data(), lons.data(), values.data()), 0);
+        target_points->row(0) = lons;
+        target_points->row(1) = lats;
+        codes_handle_delete(h);
 #else
-        Timer t;
-
-        std::cout << "Reading interpolation grid" << std::endl;
+        std::cout << "Reading interpolation grid from text file" << std::endl;
         FILE* fh = fopen("mrms.txt", "r");
         char buffer[256];
         int idx = 0;
         while(fgets(buffer, 256, fh)) {
-           float lat,lon;
-           sscanf(buffer, "%f %f", &lat, &lon);
+           double lat,lon;
+           sscanf(buffer, "%lf %lf", &lat, &lon);
            (*target_points)(0, idx) = lon;
            (*target_points)(1, idx) = lat;
            idx++;
         }
-
-        t.elapsed();
 #endif
+        t.elapsed();
     }
 
     //
     // Generate random data
     //
     void generate_random_data(
-          MatrixXd*& points, MatrixXd*& fields,
-          MatrixXd*& target_points
+          MatrixXd*& points, MatrixXd*& fields
     ) {
         int numPoints = n_lat_i*n_lon_i;
-        int numTargetPoints = n_lat_o*n_lon_o;
         numFields = 1;
 
         // Save global number of points
         g_numPoints = numPoints;
-        g_numTargetPoints = numTargetPoints;
 
         // Allocate
         points = new MatrixXd(numDims, numPoints);
         fields = new MatrixXd(numFields, numPoints);
-        target_points = new MatrixXd(numDims, numTargetPoints);
         
         // Generate a set of 3D points and associated field values
         for(int i = 0; i < n_lat_i; i++) {
@@ -491,9 +503,6 @@ namespace GlobalData {
                 (*fields)(j, i) = sqrt( exp(x*cos(3*pi*x)) * exp(y*cos(3*pi*y)) )* (j + 1);
             }
         }
-
-        // read target points
-        read_target_points(target_points);
     }
 
     //
@@ -501,11 +510,10 @@ namespace GlobalData {
     //
     void read_grib_file(
           std::string src,
-          MatrixXd*& points, MatrixXd*& fields,
-          MatrixXd*& target_points
+          MatrixXd*& points, MatrixXd*& fields
     ) {
         int ret;
-        size_t numPoints, numTargetPoints;
+        size_t numPoints;
 
         //hard code longitude and latitude index
         const int idx_nlat = 990;
@@ -532,17 +540,14 @@ namespace GlobalData {
         rewind(fp);
 
         // set these values just for testing
-        numTargetPoints = n_lat_o * n_lon_o;
         numFields = 1;
 
         // Save global number of points
         g_numPoints = numPoints;
-        g_numTargetPoints = numTargetPoints;
 
         // Allocate
         points = new MatrixXd(numDims, numPoints);
         fields = new MatrixXd(numFields, numPoints);
-        target_points = new MatrixXd(numDims, numTargetPoints);
 
         // loop through all fields and read data
         VectorXd values(numPoints);
@@ -572,15 +577,12 @@ namespace GlobalData {
         }
 
         t.elapsed();
-
-        // read target points
-        read_target_points(target_points);
     }
 
     //
     // write grib file
     //
-    void write_grib_file(std::string src, std::string dst) {
+    void write_grib_file(std::string tmpl, std::string dst) {
         size_t size = g_numTargetPoints;
         VectorXd values(size);
         Timer t;
@@ -603,23 +605,17 @@ namespace GlobalData {
              (*target_fields_p)(0,i));
         }
         fclose(fh);
-
-        t.elapsed();
-#endif
-        if(dst.empty() || src.empty())
+#else
+        if(dst.empty() || tmpl.empty())
           return;
 
         std::cout << "Writing output grib file." << std::endl;
 
-        FILE* fp_s = fopen(src.c_str(), "r");
+        FILE* fp_s = fopen(tmpl.c_str(), "r");
         if(!fp_s) return;
 
         int ret, idx = 0;
         while (codes_handle* h = codes_handle_new_from_file(0, fp_s, PRODUCT_GRIB, &ret)) {
-
-          long bitsPerValue = 0;
-          codes_get_long(h, "bitsPerValue", &bitsPerValue);
-
 #if 0
           codes_keys_iterator* iter = codes_keys_iterator_new(h, 0, 0);
           while (codes_keys_iterator_next(iter)) {
@@ -635,18 +631,10 @@ namespace GlobalData {
           // clone handle and write to output file
           codes_handle* new_h = codes_handle_clone(h);
 
-          codes_set_long(new_h, "Nx", n_lon_o);
-          codes_set_long(new_h, "Ny", n_lat_o);
-          codes_set_long(new_h, "numberOfDataPoints", size);
-          codes_set_long(new_h, "numberOfValues", size);
-          codes_set_long(new_h, "getNumberOfValues", size);
+          values = target_fields_p->row(idx);
 
-          if(bitsPerValue > 0) {
-             values = target_fields_p->row(idx);
-
-             CODES_CHECK(codes_set_double_array(new_h, "values",
-                      values.data(), size), 0);
-          }
+          CODES_CHECK(codes_set_double_array(new_h, "values",
+                   values.data(), size), 0);
 
           codes_write_message(new_h, dst.c_str(), idx ? "a" : "w");
           codes_handle_delete(new_h);
@@ -657,7 +645,7 @@ namespace GlobalData {
 
           if(idx >= numFields) break;
         }
-
+#endif
         t.elapsed();
     }
     //
@@ -733,15 +721,18 @@ namespace GlobalData {
     // Read and partition data on master node. Assumes node is big enough
     // to store and process the data.
     //
-    void read_and_partition_data(std::string src) {
+    void read_and_partition_data(std::string src, std::string tmpl) {
 
         MatrixXd *points = nullptr, *fields = nullptr, *target_points = nullptr;
 
+        // read source points and fields
 #if 1
-        generate_random_data(points, fields, target_points);
+        generate_random_data(points, fields);
 #else
-        read_grib_file(src, points, fields, target_points);
+        read_grib_file(src, points, fields);
 #endif
+        // read target points
+        read_target_points(target_points, tmpl);
 
         std::cout << "===== Data size ====" << std::endl
                   << "numPoints: " << g_numPoints << std::endl
@@ -1164,9 +1155,10 @@ void usage() {
     std::cout << "usage: ./interp [-h] --src SRC --dst DST" << std::endl << std::endl
               << "Interpolate fields in a grib2 file onto another grid or scattered obs locations." << std::endl << std::endl
               << "arguments:" << std::endl
-              << "  -h, --help   show this help message and exit" << std::endl
-              << "  -s, --src    grib file containing fields to interpolate" << std::endl
-              << "  -d, --des    destination grib file containing the grid" << std::endl;
+              << "  -h, --help      show this help message and exit" << std::endl
+              << "  -i, --input     grib file containing fields to interpolate" << std::endl
+              << "  -o, --output    output grib file contiainig result of interpolation" << std::endl
+              << "  -t, --template  template grib file that the output grib file is based on" << std::endl;
 }
 int main(int argc, char** argv) {
 
@@ -1179,17 +1171,19 @@ int main(int argc, char** argv) {
     //
     // Process command line options
     //
-    std::string src, dst;
+    std::string src, dst = "out.grib2", tmpl;
     if(mpi_rank == 0) {
         std::vector<std::string> args(argv + 1, argv + argc);
         for (auto it = args.begin(); it != args.end(); ++it) {
             if(*it == "-h" || *it == "--help") {
                 usage();
                 exit(0);
-            } else if(*it == "-s" || *it == "--src") {
+            } else if(*it == "-i" || *it == "--input") {
                 src = *++it;
-            } else if(*it == "-d" || *it == "--dst") {
+            } else if(*it == "-o" || *it == "--output") {
                 dst = *++it;
+            } else if(*it == "-t" || *it == "--template") {
+                tmpl = *++it;
             }
         }
     }
@@ -1200,7 +1194,7 @@ int main(int argc, char** argv) {
 
     GlobalData::init(nprocs, mpi_rank);
     if(mpi_rank == 0)
-        GlobalData::read_and_partition_data(src);
+        GlobalData::read_and_partition_data(src, tmpl);
 
     //
     // Each rank gets one cluster that it solves independently of other ranks
@@ -1242,7 +1236,7 @@ int main(int argc, char** argv) {
 
     // Write result to a grib file
     if(mpi_rank == 0)
-        GlobalData::write_grib_file(src, dst);
+        GlobalData::write_grib_file(tmpl, dst);
 
     //
     // Finalize MPI
