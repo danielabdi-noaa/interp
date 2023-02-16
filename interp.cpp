@@ -414,6 +414,44 @@ namespace GlobalData {
         }
     }
     //
+    //read/generate target interpolation points
+    //
+    void read_target_points(MatrixXd*& target_points) {
+#if 1
+        for(int i = 0; i < n_lat_o; i++) {
+            for(int j = 0; j < n_lon_o; j++) {
+                 (*target_points)(0, i * n_lon_o + j) =
+                     lon_min + (j * (lon_max - lon_min))/ (n_lon_o - 1);
+                 (*target_points)(1, i * n_lon_o + j) =
+                     lat_min + (i * (lat_max - lat_min))/ (n_lat_o - 1);
+            }
+        }
+#elif 0
+        target_points->setRandom();
+        target_points->row(0) = (target_points->row(1).array() + 1.0) /
+                                2.0 * (lon_max - lon_min) + lon_min;
+        target_points->row(1) = (target_points->row(0).array() + 1.0) /
+                                2.0 * (lat_max - lat_min) + lat_min;
+#else
+        Timer t;
+
+        std::cout << "Reading interpolation grid" << std::endl;
+        FILE* fh = fopen("mrms.txt", "r");
+        char buffer[256];
+        int idx = 0;
+        while(fgets(buffer, 256, fh)) {
+           float lat,lon;
+           sscanf(buffer, "%f %f", &lat, &lon);
+           (*target_points)(0, idx) = lon;
+           (*target_points)(1, idx) = lat;
+           idx++;
+        }
+
+        t.elapsed();
+#endif
+    }
+
+    //
     // Generate random data
     //
     void generate_random_data(
@@ -454,23 +492,8 @@ namespace GlobalData {
             }
         }
 
-        // Generate random set of target points
-#if 1
-        for(int i = 0; i < n_lat_o; i++) {
-            for(int j = 0; j < n_lon_o; j++) {
-                 (*target_points)(0, i * n_lon_o + j) =
-                     lon_min + (j * (lon_max - lon_min))/ (n_lon_o - 1);
-                 (*target_points)(1, i * n_lon_o + j) =
-                     lat_min + (i * (lat_max - lat_min))/ (n_lat_o - 1);
-            }
-        }
-#else
-        target_points->setRandom();
-        target_points->row(0) = (target_points->row(1).array() + 1.0) /
-                                2.0 * (lon_max - lon_min) + lon_min;
-        target_points->row(1) = (target_points->row(0).array() + 1.0) /
-                                2.0 * (lat_max - lat_min) + lat_min;
-#endif
+        // read target points
+        read_target_points(target_points);
     }
 
     //
@@ -550,29 +573,8 @@ namespace GlobalData {
 
         t.elapsed();
 
-
-        // Generate random target points in the given lat/lon range
-#if 0
-        target_points->setRandom();
-        target_points->row(0) = (target_points->row(1).array() + 1.0) /
-                                2.0 * (lon_max - lon_min) + lon_min;
-        target_points->row(1) = (target_points->row(0).array() + 1.0) /
-                                2.0 * (lat_max - lat_min) + lat_min;
-#else
-        std::cout << "Reading interpolation grid" << std::endl;
-        FILE* fh = fopen("grid.txt", "r");
-        char buffer[256];
-        idx = 0;
-        while(fgets(buffer, 256, fh)) {
-           float lat,lon;
-           sscanf(buffer, "%f %f", &lat, &lon);
-           (*target_points)(0, idx) = lon;
-           (*target_points)(1, idx) = lat;
-           idx++;
-        }
-
-        t.elapsed();
-#endif
+        // read target points
+        read_target_points(target_points);
     }
 
     //
