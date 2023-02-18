@@ -21,8 +21,8 @@ using namespace Eigen;
 // number of dimesnions 1D,2D,3D are supported
 constexpr int numDims = 2;
 
-// matrix coefficients below this value are zeroed (pruned)
-constexpr double matrix_epsilon = 0.0;
+// Number of neighbors to consider for interpolation
+constexpr int numNeighbors = 32;
 
 // Rbf shape function can be computed approximately from
 // the average distance between points
@@ -30,13 +30,6 @@ constexpr double matrix_epsilon = 0.0;
 // If D is width of the domain
 //     rbf_shape = 0.8 / (D / npoints^(1/numDims))
 constexpr double rbf_shape = 48.98; //1.85=40; //48.98=1059;
-
-// Rbf smoothing factor, often set to 0 for interpolation
-// but can be set to positive value for noisy data.
-constexpr double rbf_smoothing = 0.0;
-
-// Number of neighbors to consider for interpolation
-constexpr int numNeighbors = 32;
 
 // Cutoff radius for nearest neighbor interpolation
 constexpr bool use_cutoff_radius = false;
@@ -51,8 +44,16 @@ constexpr bool blend_interp = false;
 // Number of clusters to process per MPI rank
 constexpr int numClustersPerRank = 1;
 
-// Polynomial degree
-constexpr int degree = 0;
+// matrix coefficients below this value are zeroed (pruned)
+constexpr double matrix_epsilon = 0.0;
+
+// Rbf smoothing factor, often set to 0 for interpolation
+// but can be set to positive value for noisy data.
+constexpr double rbf_smoothing = 0.0;
+
+// Number of monomials to consider
+// Currently only monomials=1 is supported
+constexpr int monomials = 0;
 
 /*********************
  *  Grid lat/long
@@ -290,7 +291,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
 
     typedef Eigen::Triplet<double> T;
     std::vector<T> tripletList;
-    tripletList.reserve(numPoints * numNeighbors + 2 * degree * numPoints);
+    tripletList.reserve(numPoints * numNeighbors + 2 * monomials * numPoints);
 
     VectorXd query(numDims);
 
@@ -321,7 +322,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
             }
 
             // Add polynomial
-            for(int j = 0; j < degree; j++) {
+            for(int j = 0; j < monomials; j++) {
                 tripletList.push_back(T(i,numPoints + j,1));
                 tripletList.push_back(T(numPoints + j,i,1));
             }
@@ -355,7 +356,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
             }
 
             // Add polynomial
-            for(int j = 0; j < degree; j++) {
+            for(int j = 0; j < monomials; j++) {
                 tripletList.push_back(T(i,numPoints + j,1));
                 tripletList.push_back(T(numPoints + j,i,1));
             }
@@ -443,10 +444,15 @@ namespace GlobalData {
             std::cout << "===== Parameters ====" << std::endl
                       << "numDims: " << numDims << std::endl
                       << "numNeighbors: " << numNeighbors << std::endl
-                      << "numClustersPerRank: " << numClustersPerRank << std::endl
+                      << "rbf_shape: " << rbf_shape << std::endl
                       << "use_cutoff_radius: " << (use_cutoff_radius ? "true" : "false") << std::endl
                       << "cutoff_radius: " << cutoff_radius << std::endl
                       << "non_parametric: " << (non_parametric ? "true" : "false") << std::endl
+                      << "blend_interp: " << (blend_interp ? "true" : "false") << std::endl
+                      << "numClustersPerRank: " << numClustersPerRank << std::endl
+                      << "matrix_epsilon: " << matrix_epsilon << std::endl
+                      << "rbf_smoothing: " << rbf_smoothing << std::endl
+                      << "monomials: " << monomials << std::endl
                       << "=====================" << std::endl;
         }
     }
@@ -936,7 +942,7 @@ struct ClusterData {
     void build_rbf() {
         if(non_parametric)
             return;
-        A.resize(numPoints + degree, numPoints + degree);
+        A.resize(numPoints + monomials, numPoints + monomials);
         rbf_build(*ptree, points, numPoints, solver, A);
     }
     //
@@ -944,8 +950,8 @@ struct ClusterData {
     //
     void solve_rbf() {
         using namespace GlobalData;
-        VectorXd F(numPoints+degree);
-        MatrixXd W(numPoints+degree, numFields);
+        VectorXd F(numPoints+monomials);
+        MatrixXd W(numPoints+monomials, numFields);
 
         target_fields.setZero();
 
@@ -955,7 +961,7 @@ struct ClusterData {
         double avg_radius = 0;
         if(!non_parametric) {
             //compute weights for each field
-            VectorXd Wf(numPoints+degree);
+            VectorXd Wf(numPoints+monomials);
             std::cout << "Computing weights for all fields" << std::endl;
             F.setZero();
             Wf.setZero();
@@ -1024,7 +1030,7 @@ struct ClusterData {
                         for(int f = 0; f < numFields; f++)
                             target_fields(f, i) += W(j, f) * r;
                         if(k == 0) {
-                            for (int j = 0; j < degree; j++)
+                            for (int j = 0; j < monomials; j++)
                                 for(int f = 0; f < numFields; f++)
                                     target_fields(f, i) += W(numPoints + j, f);
                         }
@@ -1093,7 +1099,7 @@ struct ClusterData {
                         for(int f = 0; f < numFields; f++)
                             target_fields(f, i) += W(j, f) * r;
                         if(k == 0) {
-                            for (int j = 0; j < degree; j++)
+                            for (int j = 0; j < monomials; j++)
                                 for(int f = 0; f < numFields; f++)
                                     target_fields(f, i) += W(numPoints + j, f);
                         }
