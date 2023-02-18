@@ -45,6 +45,9 @@ constexpr double cutoff_radius = 4 * (0.8 / rbf_shape);
 // Flag to set non-parametric RBF interpolation
 constexpr bool non_parametric = false;
 
+// Blend non-parameteric vs parametric by radial distance
+constexpr bool blend_interp = false;
+
 // Number of clusters to process per MPI rank
 constexpr int numClustersPerRank = 1;
 
@@ -298,12 +301,21 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
             query = X.col(i);
             unsigned nMatches = knn_radius(index, cutoff_radius, query.data(), matches);
 
-            // Add matrix coefficients
+            // Compute matrix coefficients
+            double sum = 0;
             for (int k = 0; k < nMatches; k++) {
                 int j = matches[k].first;
                 double r = rbf(sqrt(matches[k].second));
                 if(i == j)
                     r += rbf_smoothing;
+                matches[k].second = r;
+                sum += r;
+            }
+
+            // Normalize the coefficients per row
+            for (int k = 0; k < nMatches; k++) {
+                int j = matches[k].first;
+                double r = matches[k].second / sum;
                 if(fabs(r) > matrix_epsilon)
                     tripletList.push_back(T(i,j,r));
             }
@@ -323,12 +335,21 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
             query = X.col(i);
             knn(index, numNeighbors, query.data(), &indices[0], &distances[0]);
 
-            // Add matrix coefficients
+            // Compute matrix coefficients
+            double sum = 0;
             for (int k = 0; k < numNeighbors; k++) {
                 int j = indices[k];
                 double r = rbf(sqrt(distances[k]));
                 if(i == j)
                     r += rbf_smoothing;
+                distances[k] = r;
+                sum += r;
+            }
+
+            // Normalize the coefficients per row
+            for (int k = 0; k < numNeighbors; k++) {
+                int j = indices[k];
+                double r = distances[k] / sum;
                 if(fabs(r) > matrix_epsilon)
                     tripletList.push_back(T(i,j,r));
             }
@@ -959,28 +980,45 @@ struct ClusterData {
             VectorXd query(numDims);
             std::vector<nanoflann::ResultItem<unsigned, double>> matches;
             for (int i = 0; i < numTargetPoints; i++) {
+
                 // Perform a radius search
                 query = target_points.col(i);
                 unsigned nMatches = knn_radius(*ptree, cutoff_radius, query.data(), matches);
 
                 // compute blending factor
-                d = target_points.col(i) - center;
-                double radius = sqrt(d.dot(d));
-                constexpr double r_max = 1.2, r_min = 0.5;
                 double blend;
-                if(radius > r_max * avg_radius)
-                    blend = 0;
-                else if(radius < r_min * avg_radius)
-                    blend = 1;
-                else
-                    blend = (r_max * avg_radius - radius) / ((r_max - r_min) * avg_radius);
+                if(blend_interp) {
+                    d = target_points.col(i) - center;
+                    double radius = sqrt(d.dot(d));
+                    constexpr double r_max = 1.2, r_min = 0.5;
+                    if(radius > r_max * avg_radius)
+                        blend = 0;
+                    else if(radius < r_min * avg_radius)
+                        blend = 1;
+                    else
+                        blend = (r_max * avg_radius - radius) / ((r_max - r_min) * avg_radius);
+                } else {
+                    if(non_parametric)
+                        blend = 0;
+                    else
+                        blend = 1;
+                }
 
                 // interpolate
                 double sum = 0;
                 for (int k = 0; k < nMatches; k++) {
                     int j = matches[k].first;
                     double r = rbf(sqrt(matches[k].second));
-                    sum += std::max(r,1e-6);
+                    matches[k].second = r;
+                    sum += r;
+                }
+
+                for (int k = 0; k < nMatches; k++)
+                    matches[k].second /= sum;
+
+                for (int k = 0; k < nMatches; k++) {
+                    int j = matches[k].first;
+                    double r = matches[k].second;
 
                     if(!non_parametric && (blend > 0)) {
                         for(int f = 0; f < numFields; f++)
@@ -1002,7 +1040,7 @@ struct ClusterData {
                         int j = matches[k].first;
                         double r = rbf(sqrt(matches[k].second));
                         for(int f = 0; f < numFields; f++)
-                            target_fields(f, i) += fields(f, j) * (std::max(r,1e-6) / sum);
+                            target_fields(f, i) += fields(f, j) * (r / std::max(sum,1e-6));
                     }
                 }
             }
@@ -1011,28 +1049,45 @@ struct ClusterData {
             vector<size_t> indices(numNeighbors);
             vector<double> distances(numNeighbors);
             for (int i = 0; i < numTargetPoints; i++) {
+
                 // Perform the k-nearest neighbor search
                 query = target_points.col(i);
                 knn(*ptree, numNeighbors, query.data(), &indices[0], &distances[0]);
 
                 // compute blending factor
-                d = target_points.col(i) - center;
-                double radius = sqrt(d.dot(d));
-                constexpr double r_max = 1.2, r_min = 0.5;
                 double blend;
-                if(radius > r_max * avg_radius)
-                    blend = 0;
-                else if(radius < r_min * avg_radius)
-                    blend = 1;
-                else
-                    blend = (r_max * avg_radius - radius) / ((r_max - r_min) * avg_radius);
+                if(blend_interp) {
+                    d = target_points.col(i) - center;
+                    double radius = sqrt(d.dot(d));
+                    constexpr double r_max = 1.2, r_min = 0.5;
+                    if(radius > r_max * avg_radius)
+                        blend = 0;
+                    else if(radius < r_min * avg_radius)
+                        blend = 1;
+                    else
+                        blend = (r_max * avg_radius - radius) / ((r_max - r_min) * avg_radius);
+                } else {
+                    if(non_parametric)
+                        blend = 0;
+                    else
+                        blend = 1;
+                }
 
                 // interpolate
                 double sum = 0;
                 for (int k = 0; k < numNeighbors; k++) {
                     int j = indices[k];
                     double r = rbf(sqrt(distances[k]));
-                    sum += std::max(r,1e-6);
+                    distances[k] = r;
+                    sum += r;
+                }
+
+                for (int k = 0; k < numNeighbors; k++)
+                    distances[k] /= sum;
+
+                for (int k = 0; k < numNeighbors; k++) {
+                    int j = indices[k];
+                    double r = distances[k];
 
                     if(!non_parametric && (blend > 0)) {
                         for(int f = 0; f < numFields; f++)
@@ -1045,6 +1100,7 @@ struct ClusterData {
                     }
 
                 }
+
                 target_fields.col(i) *= blend;
                 sum /= (1 - blend);
 
@@ -1054,7 +1110,7 @@ struct ClusterData {
                         int j = indices[k];
                         double r = rbf(sqrt(distances[k]));
                         for(int f = 0; f < numFields; f++)
-                            target_fields(f, i) += fields(f, j) * (std::max(r,1e-6) / sum);
+                            target_fields(f, i) += fields(f, j) * (r / std::max(sum,1e-6));
                     }
                 }
             }
