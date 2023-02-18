@@ -43,7 +43,7 @@ constexpr bool use_cutoff_radius = false;
 constexpr double cutoff_radius = 4 * (0.8 / rbf_shape);
 
 // Flag to set non-parametric RBF interpolation
-constexpr bool non_parametric = true;
+constexpr bool non_parametric = false;
 
 // Number of clusters to process per MPI rank
 constexpr int numClustersPerRank = 1;
@@ -139,29 +139,38 @@ unsigned int knn_radius(const KDTree& index, double radius, double* query,
  ********************************************************************/
 
 void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
-        VectorXi& clusterAssignments, VectorXi& clusterSizes, MatrixXd& clusterCenters) {
+        VectorXi& clusterAssignments, VectorXi& clusterSizes, MatrixXd& clusterCenters,
+        bool use_random_init = false
+    ) {
 
     std::cout << "Clustering point clouds into " << numClusters << " clusters" << std::endl;
     Timer t;
 
     // Initialize the cluster centers
-#if 0
-    for (int i = 0; i < numClusters; i++) {
-        clusterCenters.col(i) = points.col(rand() % numPoints);
-    }
-#else
-    const int n_lat = 1;
-    const int n_lon = (numClusters / n_lat);
-    double lat_d = (lat_max - lat_min) / n_lat;
-    double lon_d = (lon_max - lon_min) / n_lon;
+    if(use_random_init) {
+        for (int i = 0; i < numClusters; i++) {
+            clusterCenters.col(i) = points.col(rand() % numPoints);
+        }
+    } else {
+        const int lat_partition[] = {
+           0, 1, 1, 1, 2, 0, 2, 0, 2, 3, 2, 0, 3, 0, 2, 3, 4, 0, 3, 0, 4,
+              0, 0, 0, 4, 5, 0, 0, 4, 0, 5, 0, 4, 0, 0, 5, 4, 0, 0, 0, 4};
+        if(numClusters > 40 || lat_partition[numClusters] == 0) {
+            std::cout << "Please use a different number of MPI ranks suitable for lat-lon partioning." << std::endl;
+            exit(0);
+        }
+        int n_lat = lat_partition[numClusters];
+        int n_lon = (numClusters / n_lat);
+        double lat_d = (lat_max - lat_min) / n_lat;
+        double lon_d = (lon_max - lon_min) / n_lon;
 
-    for (int i = 0; i < n_lat; i++) {
-        for (int j = 0; j < n_lon; j++) {
-            clusterCenters(0,i * n_lon + j) = lon_min + (lon_d / 2) + j * lon_d;
-            clusterCenters(1,i * n_lon + j) = lat_min + (lat_d / 2) + i * lat_d;
+        for (int i = 0; i < n_lat; i++) {
+            for (int j = 0; j < n_lon; j++) {
+                clusterCenters(0,i * n_lon + j) = lon_min + (lon_d / 2) + j * lon_d;
+                clusterCenters(1,i * n_lon + j) = lat_min + (lat_d / 2) + i * lat_d;
+            }
         }
     }
-#endif
 
     // Perform k-means clustering until the cluster assignments stop changing
     MatrixXd sumClusterCenters(numDims, numClusters);
@@ -1083,7 +1092,8 @@ void split_cluster(const ClusterData& parent, int numClusters,
        
     // Create sub clusters
     kMeansClustering(parent.points, parent.numPoints, numClusters,
-            clusterAssignments, clusterSizes, clusterCenters);
+            clusterAssignments, clusterSizes, clusterCenters,
+            (GlobalData::numClusters > 1) ? true : false);
     
     // Initialize subcluster source points & fields
     for(int i = 0; i < numClusters; i++) {
@@ -1179,6 +1189,7 @@ void usage() {
               << "  -o, --output    output grib file contiainig result of interpolation" << std::endl
               << "  -t, --template  template grib file that the output grib file is based on" << std::endl;
 }
+
 int main(int argc, char** argv) {
 
     // Initialize MPI
