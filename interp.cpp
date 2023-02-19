@@ -22,34 +22,36 @@ using namespace Eigen;
 constexpr int numDims = 2;
 
 // Number of neighbors to consider for interpolation
-constexpr int numNeighbors = 32;
+constexpr int numNeighbors = 8;
+constexpr int numNeighborsTarget = 32;
 
 // Rbf shape function can be computed approximately from
 // the average distance between points
-//     rbf_shape  = 0.8 / average_distance
+//     rbfShape  = 0.8 / average_distance
 // If D is width of the domain
-//     rbf_shape = 0.8 / (D / npoints^(1/numDims))
-constexpr double rbf_shape = 29.61; //0.4=40; //29.61=2961
+//     rbfShape = 0.8 / (D / npoints^(1/numDims))
+constexpr double rbfShape = 40; //0.4=40; //29.61=2961 for 32 neibobors, 40 for 8 neighbors
 
 // Cutoff radius for nearest neighbor interpolation
-constexpr bool use_cutoff_radius = false;
-constexpr double cutoff_radius = 4 * (0.8 / rbf_shape);
+constexpr bool useCutoffRadius = false;
+constexpr double cutoffRadius = 4 * (0.8 / rbfShape);
+constexpr double cutoffRadiusTarget = 32 * (0.8 / rbfShape);
 
 // Flag to set non-parametric RBF interpolation
-constexpr bool non_parametric = false;
+constexpr bool nonParametric = false;
 
 // Blend non-parameteric vs parametric by radial distance
-constexpr bool blend_interp = false;
+constexpr bool blendInterp = false;
 
 // Number of clusters to process per MPI rank
 constexpr int numClustersPerRank = 1;
 
 // matrix coefficients below this value are zeroed (pruned)
-constexpr double matrix_epsilon = 0.0;
+constexpr double matEpsilon = 0.0;
 
 // Rbf smoothing factor, often set to 0 for interpolation
 // but can be set to positive value for noisy data.
-constexpr double rbf_smoothing = 0.0;
+constexpr double rbfSmoothing = 0.0;
 
 // Number of monomials to consider
 // Currently only monomials=1 is supported
@@ -254,7 +256,7 @@ typedef SparseLU<SparseMatrix<double>> RbfSolver;
 // Radial basis function
 //
 double rbf(double r_) {
-    double r = (rbf_shape * r_);
+    double r = (rbfShape * r_);
 
     // gaussian
     return exp(-r*r);
@@ -269,7 +271,7 @@ double rbf(double r_) {
     //return r*r*log(r+1e-5);
 
     // compact support gaussian bump
-    //if(r < 1.0 / rbf_shape)
+    //if(r < 1.0 / rbfShape)
     //   return exp(-1 / (1 - r*r));
     //else
     //   return 0;
@@ -297,12 +299,12 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
 
     VectorXd query(numDims);
 
-    if(use_cutoff_radius) {
+    if(useCutoffRadius) {
         std::vector<nanoflann::ResultItem<unsigned, double>> matches;
         for (int i = 0; i < numPoints; i++) {
             // Perform a radius search
             query = X.col(i);
-            unsigned nMatches = knn_radius(index, cutoff_radius, query.data(), matches);
+            unsigned nMatches = knn_radius(index, cutoffRadius, query.data(), matches);
 
             // Compute matrix coefficients
             double sum = 0;
@@ -310,7 +312,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
                 int j = matches[k].first;
                 double r = rbf(sqrt(matches[k].second));
                 if(i == j)
-                    r += rbf_smoothing;
+                    r += rbfSmoothing;
                 matches[k].second = r;
                 sum += r;
             }
@@ -319,7 +321,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
             for (int k = 0; k < nMatches; k++) {
                 int j = matches[k].first;
                 double r = matches[k].second / sum;
-                if(fabs(r) > matrix_epsilon)
+                if(fabs(r) > matEpsilon)
                     tripletList.push_back(T(i,j,r));
             }
 
@@ -344,7 +346,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
                 int j = indices[k];
                 double r = rbf(sqrt(distances[k]));
                 if(i == j)
-                    r += rbf_smoothing;
+                    r += rbfSmoothing;
                 distances[k] = r;
                 sum += r;
             }
@@ -353,7 +355,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
             for (int k = 0; k < numNeighbors; k++) {
                 int j = indices[k];
                 double r = distances[k] / sum;
-                if(fabs(r) > matrix_epsilon)
+                if(fabs(r) > matEpsilon)
                     tripletList.push_back(T(i,j,r));
             }
 
@@ -446,14 +448,16 @@ namespace GlobalData {
             std::cout << "===== Parameters ====" << std::endl
                       << "numDims: " << numDims << std::endl
                       << "numNeighbors: " << numNeighbors << std::endl
-                      << "rbf_shape: " << rbf_shape << std::endl
-                      << "use_cutoff_radius: " << (use_cutoff_radius ? "true" : "false") << std::endl
-                      << "cutoff_radius: " << cutoff_radius << std::endl
-                      << "non_parametric: " << (non_parametric ? "true" : "false") << std::endl
-                      << "blend_interp: " << (blend_interp ? "true" : "false") << std::endl
+                      << "numNeighborsTarget: " << numNeighborsTarget << std::endl
+                      << "rbfShape: " << rbfShape << std::endl
+                      << "useCutoffRadius: " << (useCutoffRadius ? "true" : "false") << std::endl
+                      << "cutoffRadius: " << cutoffRadius << std::endl
+                      << "cutoffRadiusTarget: " << cutoffRadiusTarget << std::endl
+                      << "nonParametric: " << (nonParametric ? "true" : "false") << std::endl
+                      << "blendInterp: " << (blendInterp ? "true" : "false") << std::endl
                       << "numClustersPerRank: " << numClustersPerRank << std::endl
-                      << "matrix_epsilon: " << matrix_epsilon << std::endl
-                      << "rbf_smoothing: " << rbf_smoothing << std::endl
+                      << "matEpsilon: " << matEpsilon << std::endl
+                      << "rbfSmoothing: " << rbfSmoothing << std::endl
                       << "monomials: " << monomials << std::endl
                       << "=====================" << std::endl;
         }
@@ -845,7 +849,7 @@ struct ClusterData {
         points.resize(numDims, numPoints);
         fields.resize(numFields, numPoints);
 
-        //offsets and coutns
+        //offsets and counts
         VectorXi offsets(numClusters);
         VectorXi counts(numClusters);
 
@@ -902,20 +906,7 @@ struct ClusterData {
         //offsets and coutns
         VectorXi offsets(numClusters);
         VectorXi counts(numClusters);
-    
-        //Gather target points
-        if(mpi_rank == 0) {
-            int offset = 0;
-            for(int i = 0; i < numClusters; i++) {
-                offsets(i) = offset;
-                counts(i) = target_clusterSizes(i) * numDims;
-                offset += counts(i);
-            }
-        }
-        MPI_Gatherv(target_points.data(), numTargetPoints * numDims, MPI_DOUBLE,
-                target_points_p ? target_points_p->data() : nullptr, counts.data(), offsets.data(),
-                MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    
+
         //Gather interpolated fields
         if(mpi_rank == 0) {
             int offset = 0;
@@ -942,7 +933,7 @@ struct ClusterData {
     // or cutoff radius criteria
     //
     void build_rbf() {
-        if(non_parametric)
+        if(nonParametric)
             return;
         A.resize(numPoints + monomials, numPoints + monomials);
         rbf_build(*ptree, points, numPoints, solver, A);
@@ -961,7 +952,7 @@ struct ClusterData {
 
         VectorXd d(numDims);
         double avg_radius = 0;
-        if(!non_parametric) {
+        if(!nonParametric) {
             //compute weights for each field
             VectorXd Wf(numPoints+monomials);
             std::cout << "Computing weights for all fields" << std::endl;
@@ -984,18 +975,18 @@ struct ClusterData {
         std::cout << "Interpolating fields" << std::endl;
         Timer t;
 
-        if(use_cutoff_radius) {
+        if(useCutoffRadius) {
             VectorXd query(numDims);
             std::vector<nanoflann::ResultItem<unsigned, double>> matches;
             for (int i = 0; i < numTargetPoints; i++) {
 
                 // Perform a radius search
                 query = target_points.col(i);
-                unsigned nMatches = knn_radius(*ptree, cutoff_radius, query.data(), matches);
+                unsigned nMatches = knn_radius(*ptree, cutoffRadiusTarget, query.data(), matches);
 
                 // compute blending factor
                 double blend;
-                if(blend_interp) {
+                if(blendInterp) {
                     d = target_points.col(i) - center;
                     double radius = sqrt(d.dot(d));
                     constexpr double r_max = 1.2, r_min = 0.5;
@@ -1006,7 +997,7 @@ struct ClusterData {
                     else
                         blend = (r_max * avg_radius - radius) / ((r_max - r_min) * avg_radius);
                 } else {
-                    if(non_parametric)
+                    if(nonParametric)
                         blend = 0;
                     else
                         blend = 1;
@@ -1028,7 +1019,7 @@ struct ClusterData {
                     int j = matches[k].first;
                     double r = matches[k].second;
 
-                    if(!non_parametric && (blend > 0)) {
+                    if(!nonParametric && (blend > 0)) {
                         for(int f = 0; f < numFields; f++)
                             target_fields(f, i) += W(j, f) * r;
                         if(k == 0) {
@@ -1043,7 +1034,7 @@ struct ClusterData {
                 sum /= (1 - blend);
 
                 // add non-parameteric interp
-                if(non_parametric || (blend < 1)) {
+                if(nonParametric || (blend < 1)) {
                     for (int k = 0; k < nMatches; k++) {
                         int j = matches[k].first;
                         double r = matches[k].second;
@@ -1054,17 +1045,17 @@ struct ClusterData {
             }
         } else {
             VectorXd query(numDims);
-            vector<size_t> indices(numNeighbors);
-            vector<double> distances(numNeighbors);
+            vector<size_t> indices(numNeighborsTarget);
+            vector<double> distances(numNeighborsTarget);
             for (int i = 0; i < numTargetPoints; i++) {
 
                 // Perform the k-nearest neighbor search
                 query = target_points.col(i);
-                knn(*ptree, numNeighbors, query.data(), &indices[0], &distances[0]);
+                knn(*ptree, numNeighborsTarget, query.data(), &indices[0], &distances[0]);
 
                 // compute blending factor
                 double blend;
-                if(blend_interp) {
+                if(blendInterp) {
                     d = target_points.col(i) - center;
                     double radius = sqrt(d.dot(d));
                     constexpr double r_max = 1.2, r_min = 0.5;
@@ -1075,7 +1066,7 @@ struct ClusterData {
                     else
                         blend = (r_max * avg_radius - radius) / ((r_max - r_min) * avg_radius);
                 } else {
-                    if(non_parametric)
+                    if(nonParametric)
                         blend = 0;
                     else
                         blend = 1;
@@ -1083,21 +1074,21 @@ struct ClusterData {
 
                 // interpolate
                 double sum = 0;
-                for (int k = 0; k < numNeighbors; k++) {
+                for (int k = 0; k < numNeighborsTarget; k++) {
                     int j = indices[k];
                     double r = rbf(sqrt(distances[k]));
                     distances[k] = r;
                     sum += r;
                 }
 
-                for (int k = 0; k < numNeighbors; k++)
+                for (int k = 0; k < numNeighborsTarget; k++)
                     distances[k] /= std::max(sum,1e-6);
 
-                for (int k = 0; k < numNeighbors; k++) {
+                for (int k = 0; k < numNeighborsTarget; k++) {
                     int j = indices[k];
                     double r = distances[k];
 
-                    if(!non_parametric && (blend > 0)) {
+                    if(!nonParametric && (blend > 0)) {
                         for(int f = 0; f < numFields; f++)
                             target_fields(f, i) += W(j, f) * r;
                         if(k == 0) {
@@ -1113,8 +1104,8 @@ struct ClusterData {
                 sum /= (1 - blend);
 
                 // add non-parameteric interp
-                if(non_parametric || (blend < 1)) {
-                    for (int k = 0; k < numNeighbors; k++) {
+                if(nonParametric || (blend < 1)) {
+                    for (int k = 0; k < numNeighborsTarget; k++) {
                         int j = indices[k];
                         double r = distances[k];
                         for(int f = 0; f < numFields; f++)
