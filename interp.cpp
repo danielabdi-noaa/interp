@@ -29,7 +29,7 @@ constexpr int numNeighbors = 32;
 //     rbf_shape  = 0.8 / average_distance
 // If D is width of the domain
 //     rbf_shape = 0.8 / (D / npoints^(1/numDims))
-constexpr double rbf_shape = 48.98; //1.85=40; //48.98=1059;
+constexpr double rbf_shape = 29.61; //0.4=40; //29.61=2961
 
 // Cutoff radius for nearest neighbor interpolation
 constexpr bool use_cutoff_radius = false;
@@ -157,9 +157,11 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
         }
     } else {
         const int lat_partition[] = {
-           0, 1, 1, 1, 2, 0, 2, 0, 2, 3, 2, 0, 3, 0, 2, 3, 4, 0, 3, 0, 4,
-              0, 0, 0, 4, 5, 0, 0, 4, 0, 5, 0, 4, 0, 0, 5, 4, 0, 0, 0, 4};
-        if(numClusters > 40 || lat_partition[numClusters] == 0) {
+           0, 1, 1, 1, 1, 0, 2, 0, 2, 3, 2, 0, 2, 0, 2, 3, 2, 0, 3, 0, 4,
+              3, 0, 0, 3, 5, 0, 3, 4, 0, 3, 0, 4, 3, 0, 5, 4, 0, 0, 0, 4,
+              0, 3, 0, 4, 5, 0, 0, 4, 0, 5, 0, 4, 0, 3, 5, 4, 0, 0, 4, 0,
+              0, 0, 4};
+        if(numClusters > 64 || lat_partition[numClusters] == 0) {
             std::cout << "Please use a different number of MPI ranks suitable for lat-lon partioning." << std::endl;
             exit(0);
         }
@@ -571,9 +573,9 @@ namespace GlobalData {
           MatrixXd*& points, MatrixXd*& fields
     ) {
         // Hard code longitude and latitude index
-        constexpr int idx_nlat = 990;
-        constexpr int idx_elon = 991;
-        constexpr int idx_fields[] = {0, 301};
+        constexpr int idx_nlat = 1000;
+        constexpr int idx_elon = 1001;
+        constexpr int idx_fields[] = {0};
 
         // Get the number of points
         FILE* fp = fopen(src.c_str(), "r");
@@ -1125,12 +1127,25 @@ struct ClusterData {
         t.elapsed();
     }
     //
+    // Clear
+    //
+    void clear_rbf() {
+        if(cloud) delete cloud;
+        if(ptree) delete ptree;
+        A.resize(1,1);
+        solver.compute(A);
+        points.resize(0,0);
+        fields.resize(0,0);
+        target_points.resize(0,0);
+    }
+    //
     // Conveneince function to build and solve rbf interpolation
     //
     void build_and_solve() {
         build_kdtree();
         build_rbf();
         solve_rbf();
+        clear_rbf();
     }
 };
 
@@ -1279,6 +1294,13 @@ int main(int argc, char** argv) {
             }
         }
     }
+
+    //
+    // Set Eigen to use single thread
+    //
+    Eigen::initParallel();
+    Eigen::setNbThreads(1);
+    std::cout << "Eigen will be using " << Eigen::nbThreads() << " threads." << std::endl;
 
     //
     // Cluster and decompose data
