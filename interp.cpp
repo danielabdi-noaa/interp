@@ -33,7 +33,7 @@ constexpr int numNeighborsTarget = 32;
 //  40    2961   =>  number of points in one dimension
 //0.54      40   =>  8 neighbors
 //0.40    29.61  => 32 neighbors
-constexpr double rbfShape = 0.54; 
+constexpr double rbfShape = 40;
 
 // Cutoff radius for nearest neighbor interpolation
 constexpr bool useCutoffRadius = false;
@@ -41,7 +41,7 @@ constexpr double cutoffRadius = 4 * (0.8 / rbfShape);
 constexpr double cutoffRadiusTarget = 32 * (0.8 / rbfShape);
 
 // Flag to set non-parametric RBF interpolation
-constexpr bool nonParametric = false;
+constexpr bool nonParametric = true;
 
 // Blend non-parameteric vs parametric by radial distance
 constexpr bool blendInterp = false;
@@ -424,15 +424,19 @@ namespace GlobalData {
     int numFields;
     int numClustersPerRank;
 
-    // input/output grid dimensions
-    constexpr double lat_min = -37.0; //21.14 + 10;
-    constexpr double lat_max = 37.0; //52.63 - 10;
-    constexpr double lon_min = 61.0; //225.9 + 10;
-    constexpr double lon_max = 299.0; //299.1 - 10;
-    constexpr int n_lon_i = 120; //4881;
-    constexpr int n_lat_i =  40; //2961;
-    constexpr int n_lon_o = 240; //3300; //7000;
-    constexpr int n_lat_o =  80; //2000; //3500;
+    //input/output grid dimensions
+    constexpr double lat_min = -37.0;
+    constexpr double lat_max = 37.0;
+    constexpr double lon_min = 61.0;
+    constexpr double lon_max = 299.0;
+    constexpr int n_lon_i = 4881;
+    constexpr int n_lat_i = 2961;
+    constexpr int n_lon_o = 7000;
+    constexpr int n_lat_o = 3500;
+
+    //random points are structured/unstructured
+    constexpr bool source_is_structured = true;
+    constexpr bool target_is_structured = true;
 
     //initialize global params
     void init(int nc, int r) {
@@ -469,67 +473,73 @@ namespace GlobalData {
     //
     void read_target_points(MatrixXd*& target_points, std::string tmpl) {
         Timer t;
-#if 1
-        std::cout << "Creating interpolation grid" << std::endl;
-        g_numTargetPoints = n_lat_o*n_lon_o;
-        target_points = new MatrixXd(numDims, g_numTargetPoints);
 
-        for(int i = 0; i < n_lat_o; i++) {
-            for(int j = 0; j < n_lon_o; j++) {
-                 (*target_points)(0, i * n_lon_o + j) =
-                     lon_min + (j * (lon_max - lon_min))/ (n_lon_o - 1);
-                 (*target_points)(1, i * n_lon_o + j) =
-                     lat_min + (i * (lat_max - lat_min))/ (n_lat_o - 1);
+        if(!tmpl.empty()) {
+            if(tmpl.find("grib") != string::npos) {
+                std::cout << "Reading interpolation grid from grib file" << std::endl;
+                FILE* fp_s = fopen(tmpl.c_str(), "r");
+                if(!fp_s) return;
+                int ret;
+                long numTargetPoints;
+
+                codes_handle* h = codes_handle_new_from_file(0, fp_s, PRODUCT_GRIB, &ret);
+
+                CODES_CHECK(codes_get_long(h, "numberOfPoints", &numTargetPoints), 0);
+                g_numTargetPoints = numTargetPoints;
+                target_points = new MatrixXd(numDims, g_numTargetPoints);
+
+                VectorXd lons, lats, values;
+                lons.resize(g_numTargetPoints);
+                lats.resize(g_numTargetPoints);
+                values.resize(g_numTargetPoints);
+                CODES_CHECK(codes_grib_get_data(h, lats.data(), lons.data(), values.data()), 0);
+                target_points->row(0) = lons;
+                target_points->row(1) = lats;
+
+                codes_handle_delete(h);
+            } else {
+                std::cout << "Reading interpolation grid from text file" << std::endl;
+                g_numTargetPoints = n_lat_o*n_lon_o;
+                target_points = new MatrixXd(numDims, g_numTargetPoints);
+
+                FILE* fh = fopen(tmpl.c_str(), "r");
+                char buffer[256];
+                int idx = 0;
+                while(fgets(buffer, 256, fh)) {
+                   double lat,lon;
+                   sscanf(buffer, "%lf %lf", &lat, &lon);
+                   (*target_points)(0, idx) = lon;
+                   (*target_points)(1, idx) = lat;
+                   idx++;
+                }
+            }
+        } else {
+            if(target_is_structured) {
+                std::cout << "Creating interpolation grid" << std::endl;
+                g_numTargetPoints = n_lat_o*n_lon_o;
+                target_points = new MatrixXd(numDims, g_numTargetPoints);
+
+                for(int i = 0; i < n_lat_o; i++) {
+                    for(int j = 0; j < n_lon_o; j++) {
+                         (*target_points)(0, i * n_lon_o + j) =
+                             lon_min + (j * (lon_max - lon_min))/ (n_lon_o - 1);
+                         (*target_points)(1, i * n_lon_o + j) =
+                             lat_min + (i * (lat_max - lat_min))/ (n_lat_o - 1);
+                    }
+                }
+            } else {
+                std::cout << "Creating random scattered interpolation points" << std::endl;
+                g_numTargetPoints = n_lat_o*n_lon_o;
+                target_points = new MatrixXd(numDims, g_numTargetPoints);
+
+                target_points->setRandom();
+                target_points->row(0) = (target_points->row(1).array() + 1.0) /
+                                        2.0 * (lon_max - lon_min) + lon_min;
+                target_points->row(1) = (target_points->row(0).array() + 1.0) /
+                                        2.0 * (lat_max - lat_min) + lat_min;
             }
         }
-#elif 0
-        std::cout << "Creating random interpolation grid" << std::endl;
-        g_numTargetPoints = n_lat_o*n_lon_o;
-        target_points = new MatrixXd(numDims, g_numTargetPoints);
 
-        target_points->setRandom();
-        target_points->row(0) = (target_points->row(1).array() + 1.0) /
-                                2.0 * (lon_max - lon_min) + lon_min;
-        target_points->row(1) = (target_points->row(0).array() + 1.0) /
-                                2.0 * (lat_max - lat_min) + lat_min;
-#elif 0
-        std::cout << "Reading interpolation grid from grib file" << std::endl;
-        FILE* fp_s = fopen(tmpl.c_str(), "r");
-        if(!fp_s) return;
-        int ret;
-        long numTargetPoints;
-
-        codes_handle* h = codes_handle_new_from_file(0, fp_s, PRODUCT_GRIB, &ret);
-
-        CODES_CHECK(codes_get_long(h, "numberOfPoints", &numTargetPoints), 0);
-        g_numTargetPoints = numTargetPoints;
-        target_points = new MatrixXd(numDims, g_numTargetPoints);
-
-        VectorXd lons, lats, values;
-        lons.resize(g_numTargetPoints);
-        lats.resize(g_numTargetPoints);
-        values.resize(g_numTargetPoints);
-        CODES_CHECK(codes_grib_get_data(h, lats.data(), lons.data(), values.data()), 0);
-        target_points->row(0) = lons;
-        target_points->row(1) = lats;
-
-        codes_handle_delete(h);
-#else
-        std::cout << "Reading interpolation grid from text file" << std::endl;
-        g_numTargetPoints = n_lat_o*n_lon_o;
-        target_points = new MatrixXd(numDims, g_numTargetPoints);
-
-        FILE* fh = fopen("mrms.txt", "r");
-        char buffer[256];
-        int idx = 0;
-        while(fgets(buffer, 256, fh)) {
-           double lat,lon;
-           sscanf(buffer, "%lf %lf", &lat, &lon);
-           (*target_points)(0, idx) = lon;
-           (*target_points)(1, idx) = lat;
-           idx++;
-        }
-#endif
         t.elapsed();
     }
 
@@ -550,13 +560,21 @@ namespace GlobalData {
         fields = new MatrixXd(numFields, numPoints);
         
         // Generate a set of 3D points and associated field values
-        for(int i = 0; i < n_lat_i; i++) {
-            for(int j = 0; j < n_lon_i; j++) {
-                (*points)(0, i * n_lon_i + j) =
-                    lon_min + (j * (lon_max - lon_min)) / (n_lon_i - 1);
-                (*points)(1, i * n_lon_i + j) =
-                    lat_min + (i * (lat_max - lat_min)) / (n_lat_i - 1);
+        if(source_is_structured) {
+            for(int i = 0; i < n_lat_i; i++) {
+                for(int j = 0; j < n_lon_i; j++) {
+                    (*points)(0, i * n_lon_i + j) =
+                        lon_min + (j * (lon_max - lon_min)) / (n_lon_i - 1);
+                    (*points)(1, i * n_lon_i + j) =
+                        lat_min + (i * (lat_max - lat_min)) / (n_lat_i - 1);
+                }
             }
+        } else {
+            points->setRandom();
+            points->row(0) = (points->row(1).array() + 1.0) /
+                             2.0 * (lon_max - lon_min) + lon_min;
+            points->row(1) = (points->row(0).array() + 1.0) /
+                             2.0 * (lat_max - lat_min) + lat_min;
         }
 
         VectorXd p(numDims);
@@ -581,7 +599,7 @@ namespace GlobalData {
         // Hard code longitude and latitude index
         constexpr int idx_nlat = 1000;
         constexpr int idx_elon = 1001;
-        constexpr int idx_fields[] = {0};
+        constexpr int idx_fields[] = {301};
 
         // Get the number of points
         FILE* fp = fopen(src.c_str(), "r");
@@ -642,73 +660,74 @@ namespace GlobalData {
     // write grib file
     //
     void write_grib_file(std::string tmpl, std::string dst) {
-        size_t size = g_numTargetPoints;
-        VectorXd values(size);
         Timer t;
-#if 1
-        std::cout << "Writing input and output fields for plotting" << std::endl;
-        FILE* fh = fopen("input.txt", "w");
-        for(int i = 0; i < g_numPoints; i++) {
-           fprintf(fh, "%.2f %.2f ",
-               (*points_p)(0,i),
-               (*points_p)(1,i));
-           for(int j = 0; j < numFields; j++)
-               fprintf(fh, "%.2f ", (*fields_p)(j,i));
-           fprintf(fh, "\n");
-        }
-        fclose(fh);
 
-        fh = fopen("output.txt", "w");
-        for(int i = 0; i < g_numTargetPoints; i++) {
-           fprintf(fh, "%.2f %.2f ",
-             (*target_points_p)(0,i),
-             (*target_points_p)(1,i));
-           for(int j = 0; j < numFields; j++)
-               fprintf(fh, "%.2f ", (*target_fields_p)(j,i));
-           fprintf(fh, "\n");
-        }
-        fclose(fh);
-#else
-        if(dst.empty() || tmpl.empty())
-          return;
+        if(dst.empty() || tmpl.empty()) {
+            std::cout << "Writing input and output fields for plotting" << std::endl;
 
-        std::cout << "Writing output grib file." << std::endl;
+            FILE* fh = fopen("input.txt", "w");
+            for(int i = 0; i < g_numPoints; i++) {
+               fprintf(fh, "%.2f %.2f ",
+                   (*points_p)(0,i),
+                   (*points_p)(1,i));
+               for(int j = 0; j < numFields; j++)
+                   fprintf(fh, "%.2f ", (*fields_p)(j,i));
+               fprintf(fh, "\n");
+            }
+            fclose(fh);
 
-        FILE* fp_s = fopen(tmpl.c_str(), "r");
-        if(!fp_s) return;
+            fh = fopen("output.txt", "w");
+            for(int i = 0; i < g_numTargetPoints; i++) {
+               fprintf(fh, "%.2f %.2f ",
+                 (*target_points_p)(0,i),
+                 (*target_points_p)(1,i));
+               for(int j = 0; j < numFields; j++)
+                   fprintf(fh, "%.2f ", (*target_fields_p)(j,i));
+               fprintf(fh, "\n");
+            }
+            fclose(fh);
 
-        int ret, idx = 0;
-        while (codes_handle* h = codes_handle_new_from_file(0, fp_s, PRODUCT_GRIB, &ret)) {
+        } else {
+            std::cout << "Writing output grib file." << std::endl;
+
+            FILE* fp_s = fopen(tmpl.c_str(), "r");
+            if(!fp_s) return;
+            size_t size = g_numTargetPoints;
+            VectorXd values(size);
+
+            int ret, idx = 0;
+            while (codes_handle* h = codes_handle_new_from_file(0, fp_s, PRODUCT_GRIB, &ret)) {
 #if 0
-          codes_keys_iterator* iter = codes_keys_iterator_new(h, 0, 0);
-          while (codes_keys_iterator_next(iter)) {
-            const char* key = codes_keys_iterator_get_name(iter);
-            char value[64];
-            size_t len = 64;
-            CODES_CHECK(codes_get_string(h, key, value, &len), 0);
-            std::cout << key << ": " << value << std::endl;
-          }
-          codes_keys_iterator_delete(iter);
+              codes_keys_iterator* iter = codes_keys_iterator_new(h, 0, 0);
+              while (codes_keys_iterator_next(iter)) {
+                const char* key = codes_keys_iterator_get_name(iter);
+                char value[64];
+                size_t len = 64;
+                CODES_CHECK(codes_get_string(h, key, value, &len), 0);
+                std::cout << key << ": " << value << std::endl;
+              }
+              codes_keys_iterator_delete(iter);
 #endif
 
-          // clone handle and write to output file
-          codes_handle* new_h = codes_handle_clone(h);
+              // clone handle and write to output file
+              codes_handle* new_h = codes_handle_clone(h);
 
-          values = target_fields_p->row(idx);
+              values = target_fields_p->row(idx);
 
-          CODES_CHECK(codes_set_double_array(new_h, "values",
-                   values.data(), size), 0);
+              CODES_CHECK(codes_set_double_array(new_h, "values",
+                       values.data(), size), 0);
 
-          codes_write_message(new_h, dst.c_str(), idx ? "a" : "w");
-          codes_handle_delete(new_h);
+              codes_write_message(new_h, dst.c_str(), idx ? "a" : "w");
+              codes_handle_delete(new_h);
 
-          // delete handle
-          codes_handle_delete(h);
-          idx++;
+              // delete handle
+              codes_handle_delete(h);
+              idx++;
 
-          if(idx >= numFields) break;
+              if(idx >= numFields) break;
+            }
         }
-#endif
+
         t.elapsed();
     }
     //
@@ -789,11 +808,11 @@ namespace GlobalData {
         MatrixXd *points = nullptr, *fields = nullptr, *target_points = nullptr;
 
         // read source points and fields
-#if 1
-        generate_random_data(points, fields);
-#else
-        read_grib_file(src, points, fields);
-#endif
+        if(src.empty())
+            generate_random_data(points, fields);
+        else
+            read_grib_file(src, points, fields);
+
         // read target points
         read_target_points(target_points, tmpl);
 
@@ -1275,7 +1294,7 @@ int main(int argc, char** argv) {
     // Process command line options
     //
     using GlobalData::numClustersPerRank;
-    std::string src, dst = "out.grib2", tmpl;
+    std::string src, dst, tmpl;
     numClustersPerRank = 1;
     if(mpi_rank == 0) {
         std::vector<std::string> args(argv + 1, argv + argc);
