@@ -43,9 +43,6 @@ constexpr bool nonParametric = false;
 // Blend non-parameteric vs parametric by radial distance
 constexpr bool blendInterp = false;
 
-// Number of clusters to process per MPI rank
-constexpr int numClustersPerRank = 1;
-
 // matrix coefficients below this value are zeroed (pruned)
 constexpr double matEpsilon = 0.0;
 
@@ -431,6 +428,7 @@ namespace GlobalData {
     int g_numPoints;
     int g_numTargetPoints;
     int numFields;
+    int numClustersPerRank;
 
     //initialize global params
     void init(int nc, int r) {
@@ -832,8 +830,11 @@ struct ClusterData {
     void scatter() {
         using namespace GlobalData;
 
-        // scatter number of fields
+        // scatter number of fields and clusters per rank
         MPI_Bcast(&GlobalData::numFields, 1, MPI_INT,
+                0, MPI_COMM_WORLD);
+
+        MPI_Bcast(&GlobalData::numClustersPerRank, 1, MPI_INT,
                 0, MPI_COMM_WORLD);
 
         // scatter cluster centers
@@ -1252,10 +1253,11 @@ void usage() {
     std::cout << "usage: ./interp [-h] --src SRC --dst DST" << std::endl << std::endl
               << "Interpolate fields in a grib2 file onto another grid or scattered obs locations." << std::endl << std::endl
               << "arguments:" << std::endl
-              << "  -h, --help      show this help message and exit" << std::endl
-              << "  -i, --input     grib file containing fields to interpolate" << std::endl
-              << "  -o, --output    output grib file contiainig result of interpolation" << std::endl
-              << "  -t, --template  template grib file that the output grib file is based on" << std::endl;
+              << "  -h, --help               show this help message and exit" << std::endl
+              << "  -i, --input              grib file containing fields to interpolate" << std::endl
+              << "  -o, --output             output grib file contiainig result of interpolation" << std::endl
+              << "  -t, --template           template grib file that the output grib file is based on" << std::endl
+              << "  -c, --clusters-per-rank  number of clusters per MPI rank" << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -1269,7 +1271,9 @@ int main(int argc, char** argv) {
     //
     // Process command line options
     //
+    using GlobalData::numClustersPerRank;
     std::string src, dst = "out.grib2", tmpl;
+    numClustersPerRank = 1;
     if(mpi_rank == 0) {
         std::vector<std::string> args(argv + 1, argv + argc);
         for (auto it = args.begin(); it != args.end(); ++it) {
@@ -1282,6 +1286,8 @@ int main(int argc, char** argv) {
                 dst = *++it;
             } else if(*it == "-t" || *it == "--template") {
                 tmpl = *++it;
+            } else if(*it == "-c" || *it == "--clusters-per-rank") {
+                numClustersPerRank = stoi(*++it);
             }
         }
     }
