@@ -30,7 +30,10 @@ constexpr int numNeighborsTarget = 32;
 //     rbfShape  = 0.8 / average_distance
 // If D is width of the domain
 //     rbfShape = 0.8 / (D / npoints^(1/numDims))
-constexpr double rbfShape = 40; //0.4=40; //29.61=2961 for 32 neibobors, 40 for 8 neighbors
+//  40    2961   =>  number of points in one dimension
+//0.54      40   =>  8 neighbors
+//0.40    29.61  => 32 neighbors
+constexpr double rbfShape = 0.54; 
 
 // Cutoff radius for nearest neighbor interpolation
 constexpr bool useCutoffRadius = false;
@@ -53,22 +56,6 @@ constexpr double rbfSmoothing = 0.0;
 // Number of monomials to consider
 // Currently only monomials=1 is supported
 constexpr int monomials = 0;
-
-/*********************
- *  Grid lat/long
- *********************/
-// lat/lon boundaries, use offest to account
-// for curved lambert-conformal conic grid
-constexpr double lat_min = 21.14 + 10;
-constexpr double lat_max = 52.63 - 10;
-constexpr double lon_min = 225.9 + 10;
-constexpr double lon_max = 299.1 - 10;
-
-// input/output grid dimensions
-constexpr int n_lon_i = 1799;
-constexpr int n_lat_i = 1059;
-constexpr int n_lon_o = 3300; //7000;
-constexpr int n_lat_o = 2000; //3500;
 
 /*********************
  *  Timer class
@@ -155,25 +142,32 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
             clusterCenters.col(i) = points.col(rand() % numPoints);
         }
     } else {
-        const int lat_partition[] = {
-           0, 1, 1, 1, 1, 0, 2, 0, 2, 3, 2, 0, 2, 0, 2, 3, 2, 0, 3, 0, 4,
-              3, 0, 0, 3, 5, 0, 3, 4, 0, 3, 0, 4, 3, 0, 5, 4, 0, 0, 0, 4,
-              0, 3, 0, 4, 5, 0, 0, 4, 0, 5, 0, 4, 0, 3, 5, 4, 0, 0, 4, 0,
-              0, 0, 4};
-        if(numClusters > 64 || lat_partition[numClusters] == 0) {
-            std::cout << "Please use a different number of MPI ranks suitable for lat-lon partioning." << std::endl;
-            exit(0);
+        VectorXd mins(numDims), maxs(numDims);
+        for(int j = 0; j < numDims; j++) {
+            mins(j) = points.row(j).minCoeff();
+            maxs(j) = points.row(j).maxCoeff();
         }
+        static const int lat_partition[] = {
+           0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3,
+              3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+              4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+              4, 4, 4};
+
         int n_lat = lat_partition[numClusters];
         int n_lon = (numClusters / n_lat);
-        double lat_d = (lat_max - lat_min) / n_lat;
-        double lon_d = (lon_max - lon_min) / n_lon;
+        double lat_d = (maxs(1) - mins(1)) / n_lat;
+        double lon_d = (maxs(0) - mins(0)) / n_lon;
 
+        int count = 0;
         for (int i = 0; i < n_lat; i++) {
             for (int j = 0; j < n_lon; j++) {
-                clusterCenters(0,i * n_lon + j) = lon_min + (lon_d / 2) + j * lon_d;
-                clusterCenters(1,i * n_lon + j) = lat_min + (lat_d / 2) + i * lat_d;
+                clusterCenters(0,i * n_lon + j) = mins(0) + (lon_d / 2) + j * lon_d;
+                clusterCenters(1,i * n_lon + j) = mins(1) + (lat_d / 2) + i * lat_d;
+                count++;
             }
+        }
+        for(int i = count; i < numClusters; i++) {
+            clusterCenters.col(i) = points.col(rand() % numPoints);
         }
     }
 
@@ -429,6 +423,16 @@ namespace GlobalData {
     int g_numTargetPoints;
     int numFields;
     int numClustersPerRank;
+
+    // input/output grid dimensions
+    constexpr double lat_min = -37.0; //21.14 + 10;
+    constexpr double lat_max = 37.0; //52.63 - 10;
+    constexpr double lon_min = 61.0; //225.9 + 10;
+    constexpr double lon_max = 299.0; //299.1 - 10;
+    constexpr int n_lon_i = 120; //4881;
+    constexpr int n_lat_i =  40; //2961;
+    constexpr int n_lon_o = 240; //3300; //7000;
+    constexpr int n_lat_o =  80; //2000; //3500;
 
     //initialize global params
     void init(int nc, int r) {
@@ -1161,8 +1165,7 @@ void split_cluster(const ClusterData& parent, int numClusters,
        
     // Create sub clusters
     kMeansClustering(parent.points, parent.numPoints, numClusters,
-            clusterAssignments, clusterSizes, clusterCenters,
-            (GlobalData::numClusters > 1) ? true : false);
+            clusterAssignments, clusterSizes, clusterCenters);
     
     // Initialize subcluster source points & fields
     for(int i = 0; i < numClusters; i++) {
