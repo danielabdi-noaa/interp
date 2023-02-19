@@ -1022,7 +1022,7 @@ struct ClusterData {
                 }
 
                 for (int k = 0; k < nMatches; k++)
-                    matches[k].second /= sum;
+                    matches[k].second /= std::max(sum,1e-6);
 
                 for (int k = 0; k < nMatches; k++) {
                     int j = matches[k].first;
@@ -1046,9 +1046,9 @@ struct ClusterData {
                 if(non_parametric || (blend < 1)) {
                     for (int k = 0; k < nMatches; k++) {
                         int j = matches[k].first;
-                        double r = rbf(sqrt(matches[k].second));
+                        double r = matches[k].second;
                         for(int f = 0; f < numFields; f++)
-                            target_fields(f, i) += fields(f, j) * (r / std::max(sum,1e-6));
+                            target_fields(f, i) += fields(f, j) * r;
                     }
                 }
             }
@@ -1091,7 +1091,7 @@ struct ClusterData {
                 }
 
                 for (int k = 0; k < numNeighbors; k++)
-                    distances[k] /= sum;
+                    distances[k] /= std::max(sum,1e-6);
 
                 for (int k = 0; k < numNeighbors; k++) {
                     int j = indices[k];
@@ -1116,9 +1116,9 @@ struct ClusterData {
                 if(non_parametric || (blend < 1)) {
                     for (int k = 0; k < numNeighbors; k++) {
                         int j = indices[k];
-                        double r = rbf(sqrt(distances[k]));
+                        double r = distances[k];
                         for(int f = 0; f < numFields; f++)
-                            target_fields(f, i) += fields(f, j) * (r / std::max(sum,1e-6));
+                            target_fields(f, i) += fields(f, j) * r;
                     }
                 }
             }
