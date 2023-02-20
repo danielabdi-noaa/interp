@@ -423,6 +423,7 @@ namespace GlobalData {
     int g_numTargetPoints;
     int numFields;
     int numClustersPerRank;
+    std::vector<int> field_indices;
 
     //input/output grid dimensions
     constexpr double lat_min = -37.0;
@@ -596,9 +597,6 @@ namespace GlobalData {
           std::string src,
           MatrixXd*& points, MatrixXd*& fields
     ) {
-        // Hard code longitude and latitude index
-        constexpr int idx_fields[] = {0};
-
         // Get the number of points
         FILE* fp = fopen(src.c_str(), "r");
         if(!fp) {
@@ -611,7 +609,7 @@ namespace GlobalData {
         int ret;
 
         std::cout << "Reading input grib file" << std::endl;
-        numFields = sizeof(idx_fields) / sizeof(int);
+        numFields = field_indices.size();
         {
           codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret);
 
@@ -643,7 +641,7 @@ namespace GlobalData {
         int idx = 0, f = 0;
         while (codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret)) {
 
-          if(f < numFields && idx == idx_fields[f]) {
+          if(f < numFields && idx == field_indices[f]) {
             CODES_CHECK(codes_get_double_array(h, "values",
                         values.data(), &numPoints), 0);
 
@@ -1274,14 +1272,19 @@ void merge_cluster(ClusterData& parent, int numClusters,
  *****************/
 
 void usage() {
-    std::cout << "usage: ./interp [-h] --src SRC --dst DST" << std::endl << std::endl
-              << "Interpolate fields in a grib2 file onto another grid or scattered obs locations." << std::endl << std::endl
+    std::cout << "Interpolate fields in a grib2 file onto another grid or scattered observation locations." << std::endl << std::endl
+              << "Example:" << std::endl
+              << "    OMP_NUM_THREADS=8 ./interp -i rrfs_a.t06z.bgdawpf007.tm00.grib2 -t rrfs.t06z.prslev.f007.ak.grib2 -f 0,3" << std::endl << std::endl
+              << "This does interpolation of fields 0 and 3 using 8 threads from the North-american domain to the Alaska grid." << std::endl << std::endl
+              << "usage: ./interp [-h] [--input INPUT] [--output OUTPUT] [--template TEMPLATE]" << std::endl
+              << "                     [ --clusters-per-rank CLUSTERS_PER_RANK] [--fields FIELDS]" << std::endl << std::endl
               << "arguments:" << std::endl
               << "  -h, --help               show this help message and exit" << std::endl
               << "  -i, --input              grib file containing fields to interpolate" << std::endl
               << "  -o, --output             output grib file contiainig result of interpolation" << std::endl
               << "  -t, --template           template grib file that the output grib file is based on" << std::endl
-              << "  -c, --clusters-per-rank  number of clusters per MPI rank" << std::endl;
+              << "  -c, --clusters-per-rank  number of clusters per MPI rank" << std::endl
+              << "  -f, --fields             comma separated list indices of fields in grib file that are to be interpolated" << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -1296,6 +1299,7 @@ int main(int argc, char** argv) {
     // Process command line options
     //
     using GlobalData::numClustersPerRank;
+    using GlobalData::field_indices;
     std::string src, dst, tmpl;
     numClustersPerRank = 1;
     if(mpi_rank == 0) {
@@ -1312,9 +1316,16 @@ int main(int argc, char** argv) {
                 tmpl = *++it;
             } else if(*it == "-c" || *it == "--clusters-per-rank") {
                 numClustersPerRank = stoi(*++it);
+            } else if(*it == "-f" || *it == "--fields") {
+                std::stringstream ss(*++it);
+                std::string token;
+                while (std::getline(ss, token, ','))
+                    field_indices.push_back(stoi(token));
             }
         }
     }
+    if(field_indices.empty())
+        field_indices.push_back(0);
 
     //
     // Set Eigen to use single thread
