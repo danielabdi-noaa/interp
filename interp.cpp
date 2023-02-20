@@ -597,8 +597,6 @@ namespace GlobalData {
           MatrixXd*& points, MatrixXd*& fields
     ) {
         // Hard code longitude and latitude index
-        constexpr int idx_nlat = 1000;
-        constexpr int idx_elon = 1001;
         constexpr int idx_fields[] = {0};
 
         // Get the number of points
@@ -616,15 +614,29 @@ namespace GlobalData {
         numFields = sizeof(idx_fields) / sizeof(int);
         {
           codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret);
-          CODES_CHECK(codes_get_size(h, "values", &numPoints), 0);
+
+          long np;
+          CODES_CHECK(codes_get_long(h, "numberOfPoints", &np), 0);
+          numPoints = np;
+
+          // Allocate
+          points = new MatrixXd(numDims, numPoints);
+          fields = new MatrixXd(numFields, numPoints);
+
+          // Get latitude and longitude
+          VectorXd lons, lats, values;
+          lons.resize(numPoints);
+          lats.resize(numPoints);
+          values.resize(numPoints);
+          CODES_CHECK(codes_grib_get_data(h, lats.data(), lons.data(), values.data()), 0);
+          points->row(0) = lons;
+          points->row(1) = lats;
+
           codes_handle_delete(h);
+
           rewind(fp);
         }
         g_numPoints = numPoints;
-
-        // Allocate
-        points = new MatrixXd(numDims, numPoints);
-        fields = new MatrixXd(numFields, numPoints);
 
         // loop through all fields and read data
         VectorXd values(numPoints);
@@ -637,16 +649,6 @@ namespace GlobalData {
 
             fields->row(f) = values;
             f++;
-          } else if(idx == idx_nlat) {
-            CODES_CHECK(codes_get_double_array(h, "values",
-                        values.data(), &numPoints), 0);
-
-            points->row(1) = values;
-          } else if(idx == idx_elon) {
-            CODES_CHECK(codes_get_double_array(h, "values",
-                        values.data(), &numPoints), 0);
-
-            points->row(0) = values;
           }
 
           codes_handle_delete(h);
