@@ -595,7 +595,19 @@ namespace GlobalData {
         int ret;
 
         std::cout << "Reading input grib file" << std::endl;
+
+        // count number of fileds
         numFields = field_indices.size();
+        if(numFields == 0) {
+            if (codes_count_in_file(0, fp, &numFields) != 0) {
+                std::cout << "Failed to get field count" << std::endl;
+                exit(0);
+            }
+            for(int i = 0; i < numFields; i++)
+                field_indices.push_back(i);
+        }
+
+        // read lat/lon
         {
           codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret);
 
@@ -1212,6 +1224,8 @@ void usage() {
               << "  -t, --template           template grib file that the output grib file is based on" << std::endl
               << "  -c, --clusters-per-rank  number of clusters per MPI rank" << std::endl
               << "  -f, --fields             comma separated list indices of fields in grib file that are to be interpolated" << std::endl
+              << "                           hyphen(-) can be used to indicate range of fields e.g. 0-3 means fields 0,1,2" << std::endl
+              << "                           question(?) can be used to indicate all fields in a grib file" << std::endl
               << "  -n, --neighbors          number of neighbors to be used during solution for weights using source points" << std::endl
               << "  -ni, --neighbors-interp  number of neighbors to be used during interpolation at target points" << std::endl
               << "  -r, --rbf-shape          shape factor for RBF kernel" << std::endl
@@ -1246,6 +1260,7 @@ int main(int argc, char** argv) {
     cutoffRadiusInterp = 0.64;
     rbfSmoothing = 0.0;
     monomials = 0;
+    field_indices.push_back(0);
 
     if(mpi_rank == 0) {
         std::vector<std::string> args(argv + 1, argv + argc);
@@ -1264,8 +1279,19 @@ int main(int argc, char** argv) {
             } else if(*it == "-f" || *it == "--fields") {
                 std::stringstream ss(*++it);
                 std::string token;
-                while (std::getline(ss, token, ','))
-                    field_indices.push_back(stoi(token));
+                field_indices.clear();
+                while (std::getline(ss, token, ',')) {
+                    size_t idx = token.find("-");
+                    if(idx == std::string::npos) {
+                        if(token != "?")
+                            field_indices.push_back(stoi(token));
+                    } else {
+                        int start = stoi(token.substr(0,idx));
+                        int end = stoi(token.substr(idx+1));
+                        for(int i = start; i < end; i++)
+                            field_indices.push_back(i);
+                    }
+                }
             } else if(*it == "-r" || *it == "--rbf-shape") {
                 rbfShape = stof(*++it);
             } else if(*it == "-n" || *it == "--neighbors") {
@@ -1285,8 +1311,6 @@ int main(int argc, char** argv) {
             }
         }
     }
-    if(field_indices.empty())
-        field_indices.push_back(0);
 
     //
     // Set Eigen to use single thread

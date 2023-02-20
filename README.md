@@ -23,6 +23,8 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
       -t, --template           template grib file that the output grib file is based on
       -c, --clusters-per-rank  number of clusters per MPI rank
       -f, --fields             comma separated list indices of fields in grib file that are to be interpolated
+                               hyphen(-) can be used to indicate range of fields e.g. 0-3 means fields 0,1,2
+                               question(?) can be used to indicate all fields in a grib file
       -n, --neighbors          number of neighbors to be used during solution for weights using source points
       -ni, --neighbors-interp  number of neighbors to be used during interpolation at target points
       -r, --rbf-shape          shape factor for RBF kernel
