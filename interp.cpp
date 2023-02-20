@@ -62,18 +62,18 @@ constexpr int monomials = 0;
  *********************/
 class Timer {
 private:
-	using Clock = std::chrono::steady_clock;
-	using Second = std::chrono::duration<double, std::ratio<1> >;
-	std::chrono::time_point<Clock> m_beg { Clock::now() };
+    using Clock = std::chrono::steady_clock;
+    using Second = std::chrono::duration<double, std::ratio<1> >;
+    std::chrono::time_point<Clock> m_beg { Clock::now() };
 public:
-	void reset() {
-		m_beg = Clock::now();
-	}
-	void elapsed() {
-		auto duration = std::chrono::duration_cast<Second>(Clock::now() - m_beg).count();
+    void reset() {
+        m_beg = Clock::now();
+    }
+    void elapsed() {
+        auto duration = std::chrono::duration_cast<Second>(Clock::now() - m_beg).count();
         std::cout << "Finished in " << duration << " secs." << std::endl;
         reset();
-	}
+    }
 };
 
 /***************************************************
@@ -599,7 +599,7 @@ namespace GlobalData {
         // Hard code longitude and latitude index
         constexpr int idx_nlat = 1000;
         constexpr int idx_elon = 1001;
-        constexpr int idx_fields[] = {301};
+        constexpr int idx_fields[] = {0};
 
         // Get the number of points
         FILE* fp = fopen(src.c_str(), "r");
