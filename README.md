@@ -11,7 +11,8 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
     This does interpolation of fields 0 and 3 using 8 threads from the North-american domain to the Alaska grid.
     
     usage: ./interp [-h] [--input INPUT] [--output OUTPUT] [--template TEMPLATE]
-                         [--clusters-per-rank CLUSTERS_PER_RANK] [--fields FIELDS]
+                         [ --clusters-per-rank CLUSTERS_PER_RANK] [--fields FIELDS]
+                         [ --neighbors NEIGHBORS] [--neighbors-interp NEIGHBORS_INTERP]
     
     arguments:
       -h, --help               show this help message and exit
@@ -20,6 +21,8 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
       -t, --template           template grib file that the output grib file is based on
       -c, --clusters-per-rank  number of clusters per MPI rank
       -f, --fields             comma separated list indices of fields in grib file that are to be interpolated
+      -n, --neighbors          number of neighbors to be used during solution for weights using source points
+      -ni, --neighbors-interp  number of neighbors to be used during interpolation at target points
 
 ## Requirements
 - C++ Eigen library
