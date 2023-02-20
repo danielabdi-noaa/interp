@@ -11,8 +11,10 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
     This does interpolation of fields 0 and 3 using 8 threads from the North-american domain to the Alaska grid.
     
     usage: ./interp [-h] [--input INPUT] [--output OUTPUT] [--template TEMPLATE]
-                         [ --clusters-per-rank CLUSTERS_PER_RANK] [--fields FIELDS]
-                         [ --neighbors NEIGHBORS] [--neighbors-interp NEIGHBORS_INTERP]
+                         [--clusters-per-rank CLUSTERS_PER_RANK] [--fields FIELDS]
+                         [--neighbors NEIGHBORS] [--neighbors-interp NEIGHBORS_INTERP]
+                         [--rbf-shape RBF_SHAPE] [--use-cutoff-radius USE_CUTOFF_RADIUS]
+                         [--cutoff-radius CUTOFF_RADIUS] [--cutoff-radius-interp CUTOFF_RADIUS_INTERP]
     
     arguments:
       -h, --help               show this help message and exit
@@ -23,6 +25,12 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
       -f, --fields             comma separated list indices of fields in grib file that are to be interpolated
       -n, --neighbors          number of neighbors to be used during solution for weights using source points
       -ni, --neighbors-interp  number of neighbors to be used during interpolation at target points
+      -r, --rbf-shape          shape factor for RBF kernel
+      -ucr, --use-cutoff-radius      use cutoff radius instead of fixed number of nearest neighbors
+      -cr, --cutoff-radius           cutoff radius used during solution
+      -cri, --cutoff-radius-interp   cutoff radius used during interpolation
+      -r, --rbf-smoothing      smoothing factor for rbf interpolation
+      -m, --monomials          number of monomials (supported 0 or 1)
 
 ## Requirements
 - C++ Eigen library

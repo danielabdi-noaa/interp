@@ -29,27 +29,24 @@ constexpr int numDims = 2;
 //  40    2961   =>  number of points in one dimension
 //0.54      40   =>  8 neighbors
 //0.40    29.61  => 32 neighbors
-constexpr double rbfShape = 40;
+static double rbfShape;
 
 // Number of neighbors to consider for interpolation
 static int numNeighbors;
 static int numNeighborsInterp;
 
-// Cutoff radius for nearest neighbor interpolation
-constexpr bool useCutoffRadius = false;
-constexpr double cutoffRadius = 4 * (0.8 / rbfShape);
-constexpr double cutoffRadiusInterp = 32 * (0.8 / rbfShape);
-
-// matrix coefficients below this value are zeroed (pruned)
-constexpr double matEpsilon = 0.0;
+// Cutoff radius for nearest neighbor search
+static bool useCutoffRadius = false;
+static double cutoffRadius = 0.08;
+static double cutoffRadiusInterp = 0.64;
 
 // Rbf smoothing factor, often set to 0 for interpolation
 // but can be set to positive value for noisy data.
-constexpr double rbfSmoothing = 0.0;
+static double rbfSmoothing;
 
 // Number of monomials to consider
 // Currently only monomials=1 is supported
-constexpr int monomials = 0;
+static int monomials;
 
 /*********************
  *  Timer class
@@ -306,8 +303,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
             for (int k = 0; k < nMatches; k++) {
                 int j = matches[k].first;
                 double r = matches[k].second / sum;
-                if(fabs(r) > matEpsilon)
-                    tripletList.push_back(T(i,j,r));
+                tripletList.push_back(T(i,j,r));
             }
 
             // Add polynomial
@@ -340,8 +336,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
             for (int k = 0; k < numNeighbors; k++) {
                 int j = indices[k];
                 double r = distances[k] / sum;
-                if(fabs(r) > matEpsilon)
-                    tripletList.push_back(T(i,j,r));
+                tripletList.push_back(T(i,j,r));
             }
 
             // Add polynomial
@@ -455,7 +450,6 @@ namespace GlobalData {
                       << "cutoffRadius: " << cutoffRadius << std::endl
                       << "cutoffRadiusInterp: " << cutoffRadiusInterp << std::endl
                       << "numClustersPerRank: " << numClustersPerRank << std::endl
-                      << "matEpsilon: " << matEpsilon << std::endl
                       << "rbfSmoothing: " << rbfSmoothing << std::endl
                       << "monomials: " << monomials << std::endl
                       << "=====================" << std::endl;
@@ -845,11 +839,24 @@ struct ClusterData {
     void scatter() {
         using namespace GlobalData;
 
-        // scatter number of fields and clusters per rank
+        // scatter number of fields and parameters
         MPI_Bcast(&GlobalData::numFields, 1, MPI_INT,
                 0, MPI_COMM_WORLD);
-
         MPI_Bcast(&GlobalData::numClustersPerRank, 1, MPI_INT,
+                0, MPI_COMM_WORLD);
+        MPI_Bcast(&numNeighbors, 1, MPI_INT,
+                0, MPI_COMM_WORLD);
+        MPI_Bcast(&numNeighborsInterp, 1, MPI_INT,
+                0, MPI_COMM_WORLD);
+        MPI_Bcast(&rbfShape, 1, MPI_DOUBLE,
+                0, MPI_COMM_WORLD);
+        MPI_Bcast(&useCutoffRadius, 1, MPI_C_BOOL,
+                0, MPI_COMM_WORLD);
+        MPI_Bcast(&cutoffRadius, 1, MPI_DOUBLE,
+                0, MPI_COMM_WORLD);
+        MPI_Bcast(&cutoffRadiusInterp, 1, MPI_DOUBLE,
+                0, MPI_COMM_WORLD);
+        MPI_Bcast(&rbfSmoothing, 1, MPI_DOUBLE,
                 0, MPI_COMM_WORLD);
 
         // scatter cluster centers
@@ -1194,8 +1201,10 @@ void usage() {
               << "    OMP_NUM_THREADS=8 ./interp -i rrfs_a.t06z.bgdawpf007.tm00.grib2 -t rrfs.t06z.prslev.f007.ak.grib2 -f 0,3" << std::endl << std::endl
               << "This does interpolation of fields 0 and 3 using 8 threads from the North-american domain to the Alaska grid." << std::endl << std::endl
               << "usage: ./interp [-h] [--input INPUT] [--output OUTPUT] [--template TEMPLATE]" << std::endl
-              << "                     [ --clusters-per-rank CLUSTERS_PER_RANK] [--fields FIELDS]" << std::endl
-              << "                     [ --neighbors NEIGHBORS] [--neighbors-interp NEIGHBORS_INTERP]" << std::endl << std::endl
+              << "                     [--clusters-per-rank CLUSTERS_PER_RANK] [--fields FIELDS]" << std::endl
+              << "                     [--neighbors NEIGHBORS] [--neighbors-interp NEIGHBORS_INTERP]" << std::endl
+              << "                     [--rbf-shape RBF_SHAPE] [--use-cutoff-radius USE_CUTOFF_RADIUS]" << std::endl
+              << "                     [--cutoff-radius CUTOFF_RADIUS] [--cutoff-radius-interp CUTOFF_RADIUS_INTERP]" << std::endl << std::endl
               << "arguments:" << std::endl
               << "  -h, --help               show this help message and exit" << std::endl
               << "  -i, --input              grib file containing fields to interpolate" << std::endl
@@ -1204,7 +1213,13 @@ void usage() {
               << "  -c, --clusters-per-rank  number of clusters per MPI rank" << std::endl
               << "  -f, --fields             comma separated list indices of fields in grib file that are to be interpolated" << std::endl
               << "  -n, --neighbors          number of neighbors to be used during solution for weights using source points" << std::endl
-              << "  -ni, --neighbors-interp  number of neighbors to be used during interpolation at target points" << std::endl;
+              << "  -ni, --neighbors-interp  number of neighbors to be used during interpolation at target points" << std::endl
+              << "  -r, --rbf-shape          shape factor for RBF kernel" << std::endl
+              << "  -ucr, --use-cutoff-radius      use cutoff radius instead of fixed number of nearest neighbors" << std::endl
+              << "  -cr, --cutoff-radius           cutoff radius used during solution" << std::endl
+              << "  -cri, --cutoff-radius-interp   cutoff radius used during interpolation" << std::endl
+              << "  -r, --rbf-smoothing      smoothing factor for rbf interpolation" << std::endl
+              << "  -m, --monomials          number of monomials (supported 0 or 1)" << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -1225,6 +1240,12 @@ int main(int argc, char** argv) {
     numNeighbors = 1;
     numNeighborsInterp = 32;
     numClustersPerRank = 1;
+    rbfShape = 40;
+    useCutoffRadius = false;
+    cutoffRadius = 0.08;
+    cutoffRadiusInterp = 0.64;
+    rbfSmoothing = 0.0;
+    monomials = 0;
 
     if(mpi_rank == 0) {
         std::vector<std::string> args(argv + 1, argv + argc);
@@ -1245,10 +1266,22 @@ int main(int argc, char** argv) {
                 std::string token;
                 while (std::getline(ss, token, ','))
                     field_indices.push_back(stoi(token));
+            } else if(*it == "-r" || *it == "--rbf-shape") {
+                rbfShape = stof(*++it);
             } else if(*it == "-n" || *it == "--neighbors") {
                 numNeighbors = stoi(*++it);
             } else if(*it == "-ni" || *it == "--neighbors-interp") {
                 numNeighborsInterp = stoi(*++it);
+            } else if(*it == "-ucr" || *it == "--use-cutoff-radius") {
+                useCutoffRadius = true;
+            } else if(*it == "-cr" || *it == "--cutoff-radius") {
+                cutoffRadius = stof(*++it);
+            } else if(*it == "-cri" || *it == "--cutoff-radius-interp") {
+                cutoffRadiusInterp = stof(*++it);
+            } else if(*it == "-s" || *it == "--rbf-smoothing") {
+                rbfSmoothing = stof(*++it);
+            } else if(*it == "-m" || *it == "--monomials") {
+                monomials = stoi(*++it);
             }
         }
     }
