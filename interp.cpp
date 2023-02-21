@@ -9,6 +9,7 @@
 #include <mpi.h>
 #include <chrono>
 #include <eccodes.h>
+#include <omp.h>
 #include "knn/nanoflann.hpp"
 
 using namespace std;
@@ -1327,6 +1328,14 @@ int main(int argc, char** argv) {
                 useTestField = true;
             }
         }
+
+        int nthreads;
+#pragma omp parallel
+        {
+            nthreads = omp_get_num_threads();
+        }
+        std::cout << "Threads: " << nthreads << std::endl;
+        numClustersPerRank = std::max(numClustersPerRank, nthreads);
 
         std::cout << "===== Parameters ====" << std::endl
                   << "numDims: " << numDims << std::endl
