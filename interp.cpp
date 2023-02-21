@@ -465,6 +465,7 @@ namespace GlobalData {
                 lats.resize(g_numTargetPoints);
                 values.resize(g_numTargetPoints);
                 CODES_CHECK(codes_grib_get_data(h, lats.data(), lons.data(), values.data()), 0);
+                lons = (lons.array() < 0).select(lons.array() + 360, lons.array());
                 target_points->row(0) = lons;
                 target_points->row(1) = lats;
 
@@ -614,6 +615,7 @@ namespace GlobalData {
           lats.resize(numPoints);
           values.resize(numPoints);
           CODES_CHECK(codes_grib_get_data(h, lats.data(), lons.data(), values.data()), 0);
+          lons = (lons.array() < 0).select(lons.array() + 360, lons.array());
           points->row(0) = lons;
           points->row(1) = lats;
 
