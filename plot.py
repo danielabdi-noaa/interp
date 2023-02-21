@@ -24,7 +24,7 @@ y = np.array(y)
 z = np.array(z)
 
 fig, axs = plt.subplots(1, 1, figsize=[13.63, 10.0])
-# axs.tricontourf(x, y, z, cmap='viridis')
+#axs.tricontourf(x, y, z, cmap='viridis')
 axs.scatter(x, y, c=z, s=0.03, cmap="viridis")
 
 plt.savefig(args.output)

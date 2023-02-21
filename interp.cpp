@@ -439,21 +439,6 @@ namespace GlobalData {
         clusterSizes.resize(numClusters);
         target_clusterSizes.resize(numClusters);
         clusterCenters.resize(numDims,numClusters);
-
-        if(mpi_rank == 0) {
-            std::cout << "===== Parameters ====" << std::endl
-                      << "numDims: " << numDims << std::endl
-                      << "numNeighbors: " << numNeighbors << std::endl
-                      << "numNeighborsInterp: " << numNeighborsInterp << std::endl
-                      << "rbfShape: " << rbfShape << std::endl
-                      << "useCutoffRadius: " << (useCutoffRadius ? "true" : "false") << std::endl
-                      << "cutoffRadius: " << cutoffRadius << std::endl
-                      << "cutoffRadiusInterp: " << cutoffRadiusInterp << std::endl
-                      << "numClustersPerRank: " << numClustersPerRank << std::endl
-                      << "rbfSmoothing: " << rbfSmoothing << std::endl
-                      << "monomials: " << monomials << std::endl
-                      << "=====================" << std::endl;
-        }
     }
     //
     //read/generate target interpolation points
@@ -486,12 +471,16 @@ namespace GlobalData {
                 codes_handle_delete(h);
             } else {
                 std::cout << "Reading interpolation grid from text file" << std::endl;
-                g_numTargetPoints = n_lat_o*n_lon_o;
-                target_points = new MatrixXd(numDims, g_numTargetPoints);
 
                 FILE* fh = fopen(tmpl.c_str(), "r");
                 char buffer[256];
                 int idx = 0;
+
+                if(fgets(buffer, 256, fh)) {
+                    sscanf(buffer, "%d", &g_numTargetPoints);
+                    target_points = new MatrixXd(numDims, g_numTargetPoints);
+                }
+
                 while(fgets(buffer, 256, fh)) {
                    double lat,lon;
                    sscanf(buffer, "%lf %lf", &lat, &lon);
@@ -1310,6 +1299,19 @@ int main(int argc, char** argv) {
                 monomials = stoi(*++it);
             }
         }
+
+        std::cout << "===== Parameters ====" << std::endl
+                  << "numDims: " << numDims << std::endl
+                  << "numNeighbors: " << numNeighbors << std::endl
+                  << "numNeighborsInterp: " << numNeighborsInterp << std::endl
+                  << "rbfShape: " << rbfShape << std::endl
+                  << "useCutoffRadius: " << (useCutoffRadius ? "true" : "false") << std::endl
+                  << "cutoffRadius: " << cutoffRadius << std::endl
+                  << "cutoffRadiusInterp: " << cutoffRadiusInterp << std::endl
+                  << "numClustersPerRank: " << numClustersPerRank << std::endl
+                  << "rbfSmoothing: " << rbfSmoothing << std::endl
+                  << "monomials: " << monomials << std::endl
+                  << "=====================" << std::endl;
     }
 
     //
