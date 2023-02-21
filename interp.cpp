@@ -491,11 +491,11 @@ namespace GlobalData {
                 }
             }
         } else {
+            g_numTargetPoints = n_lat_o*n_lon_o;
+            target_points = new MatrixXd(numDims, g_numTargetPoints);
+
             if(target_is_structured) {
                 std::cout << "Creating interpolation grid" << std::endl;
-                g_numTargetPoints = n_lat_o*n_lon_o;
-                target_points = new MatrixXd(numDims, g_numTargetPoints);
-
                 for(int i = 0; i < n_lat_o; i++) {
                     for(int j = 0; j < n_lon_o; j++) {
                          (*target_points)(0, i * n_lon_o + j) =
@@ -506,9 +506,6 @@ namespace GlobalData {
                 }
             } else {
                 std::cout << "Creating random scattered interpolation points" << std::endl;
-                g_numTargetPoints = n_lat_o*n_lon_o;
-                target_points = new MatrixXd(numDims, g_numTargetPoints);
-
                 target_points->setRandom();
                 target_points->row(0) = (target_points->row(1).array() + 1.0) /
                                         2.0 * (lon_max - lon_min) + lon_min;
@@ -520,6 +517,30 @@ namespace GlobalData {
         t.elapsed();
     }
 
+    //
+    // Compute test field values at given locations
+    //
+    void compute_test_fields(const int numPoints, const MatrixXd& points, MatrixXd& fields) {
+        VectorXd p(numDims);
+        for (int i = 0; i < numPoints; i++) {
+            for(int j = 0; j < numFields; j++) {
+                p(0) = 2 * (points(0,i) - lon_min) / (lon_max - lon_min) - 1;
+                p(1) = 2 * (points(1,i) - lat_min) / (lat_max - lat_min) - 1;
+                const double x = p(0), y = p(1);
+                constexpr double pi = 3.14159265358979323846;
+                fields(j, i) = sqrt( exp(x*cos(3*pi*x)) * exp(y*cos(3*pi*y)) )* (j + 1);
+            }
+        }
+    }
+    //
+    // Compute L2-norm of error of interpolation
+    //
+    void compute_L2norm_error() {
+        MatrixXd fields_error(numFields,g_numTargetPoints);
+        compute_test_fields(g_numTargetPoints, *target_points_p, fields_error);
+        fields_error -= *target_fields_p;
+        std::cout << "L2 norm of error of interpolation: " << fields_error.norm() << std::endl;
+    }
     //
     // Generate random data
     //
@@ -554,16 +575,8 @@ namespace GlobalData {
                              2.0 * (lat_max - lat_min) + lat_min;
         }
 
-        VectorXd p(numDims);
-        for (int i = 0; i < numPoints; i++) {
-            for(int j = 0; j < numFields; j++) {
-                p(0) = 2 * ((*points)(0,i) - lon_min) / (lon_max - lon_min) - 1;
-                p(1) = 2 * ((*points)(1,i) - lat_min) / (lat_max - lat_min) - 1;
-                const double x = p(0), y = p(1);
-                constexpr double pi = 3.14159265358979323846;
-                (*fields)(j, i) = sqrt( exp(x*cos(3*pi*x)) * exp(y*cos(3*pi*y)) )* (j + 1);
-            }
-        }
+        // Compute test field values at given locations
+        compute_test_fields(numPoints,*points,*fields);
     }
 
     //
@@ -1372,6 +1385,10 @@ int main(int argc, char** argv) {
     // Write result to a grib file
     if(mpi_rank == 0)
         GlobalData::write_grib_file(tmpl, dst);
+
+    // Compute L2 norm of error
+    if(src.empty())
+        GlobalData::compute_L2norm_error();
 
     //
     // Finalize MPI
