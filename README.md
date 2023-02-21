@@ -33,10 +33,12 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
       -cri, --cutoff-radius-interp   cutoff radius used during interpolation
       -r, --rbf-smoothing      smoothing factor for rbf interpolation
       -m, --monomials          number of monomials (supported 0 or 1)
+      -utf, --use-test-field   use test field function for initializing fields (applies even if grib2 file input is used)
+                               this could be useful for tuning parameters with L2 error of ground truth.
 
 ## Requirements
-- C++ Eigen library
-- ECMWF eccodes library
+- [C++ Eigen library](https://eigen.tuxfamily.org/dox/)
+- [ECMWF eccodes library](https://github.com/ecmwf/eccodes)
 
 ## Build
     ./build.sh

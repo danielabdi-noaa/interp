@@ -48,6 +48,9 @@ static double rbfSmoothing;
 // Currently only monomials=1 is supported
 static int monomials;
 
+// Use test function for field initialization
+static bool useTestField;
+
 /*********************
  *  Timer class
  *********************/
@@ -638,21 +641,26 @@ namespace GlobalData {
         }
         g_numPoints = numPoints;
 
-        // loop through all fields and read data
-        VectorXd values(numPoints);
-        int idx = 0, f = 0;
-        while (codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret)) {
+        if(useTestField) {
+            // Compute test field values at given locations
+            compute_test_fields(numPoints,*points,*fields);
+        } else {
+            // loop through all fields and read data
+            VectorXd values(numPoints);
+            int idx = 0, f = 0;
+            while (codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret)) {
 
-          if(f < numFields && idx == field_indices[f]) {
-            CODES_CHECK(codes_get_double_array(h, "values",
-                        values.data(), &numPoints), 0);
+              if(f < numFields && idx == field_indices[f]) {
+                CODES_CHECK(codes_get_double_array(h, "values",
+                            values.data(), &numPoints), 0);
 
-            fields->row(f) = values;
-            f++;
-          }
+                fields->row(f) = values;
+                f++;
+              }
 
-          codes_handle_delete(h);
-          idx++;
+              codes_handle_delete(h);
+              idx++;
+            }
         }
 
         t.elapsed();
@@ -1237,7 +1245,9 @@ void usage() {
               << "  -cr, --cutoff-radius           cutoff radius used during solution" << std::endl
               << "  -cri, --cutoff-radius-interp   cutoff radius used during interpolation" << std::endl
               << "  -r, --rbf-smoothing      smoothing factor for rbf interpolation" << std::endl
-              << "  -m, --monomials          number of monomials (supported 0 or 1)" << std::endl;
+              << "  -m, --monomials          number of monomials (supported 0 or 1)" << std::endl
+              << "  -utf, --use-test-field   use test field function for initializing fields (applies even if grib2 file input is used)" << std::endl
+              << "                           this could be useful for tuning parameters with L2 error of ground truth." << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -1264,6 +1274,7 @@ int main(int argc, char** argv) {
     cutoffRadiusInterp = 0.64;
     rbfSmoothing = 0.0;
     monomials = 0;
+    useTestField = false;
     field_indices.push_back(0);
 
     if(mpi_rank == 0) {
@@ -1312,6 +1323,8 @@ int main(int argc, char** argv) {
                 rbfSmoothing = stof(*++it);
             } else if(*it == "-m" || *it == "--monomials") {
                 monomials = stoi(*++it);
+            } else if(*it == "-utf" || *it == "--use-test-field") {
+                useTestField = true;
             }
         }
 
@@ -1387,7 +1400,7 @@ int main(int argc, char** argv) {
         GlobalData::write_grib_file(tmpl, dst);
 
     // Compute L2 norm of error
-    if(src.empty())
+    if(src.empty() || useTestField)
         GlobalData::compute_L2norm_error();
 
     //
