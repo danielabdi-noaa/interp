@@ -220,19 +220,14 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
 }
 
 /**************************************************************
- * Define Solver for Ax=B equation from Eigen
- * Depending on how you construct the interpolation matrix choose
- * the right solver. LU vs Cholesky decomp, direct vs iterative etc.
- * Only one solver can be chosen at one time.
+ * Pick a linear equations systems solver from Eigen (direct/iterative)
  **************************************************************/
 
+#ifdef ITERATIVE
+typedef BiCGSTAB<SparseMatrix<double>, IncompleteLUT<double,int>> RbfSolver;
+#else
 typedef SparseLU<SparseMatrix<double>> RbfSolver;
-//typedef SimplicialLDLT<SparseMatrix<double>, Upper> RbfSolver;
-
-//typedef BiCGSTAB<SparseMatrix<double>, DiagonalPreconditioner<double>> RbfSolver;
-//typedef BiCGSTAB<SparseMatrix<double>, IncompleteLUT<double,int>> RbfSolver;
-//typedef ConjugateGradient<SparseMatrix<double>, Lower|Upper, DiagonalPreconditioner<double>> RbfSolver;
-//typedef ConjugateGradient<SparseMatrix<double>, Lower|Upper, IncompleteLUT<double,int>> RbfSolver;
+#endif
 
 /**************************************************************
  * RBF interpolation using nearest neighbor search

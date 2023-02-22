@@ -82,7 +82,7 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
 
 - [X] Add regularization to high-order RBF interpolation
 - [X] Process multiple clusters per mpi rank to increase usability of direct solvers
-- [ ] Make iterative solvers CG and BiCGstab robust
+- [X] Make iterative solver BiCGstab robust
 - [X] Add NetCDF/HDF5 reading/writing capability for input/output resp
 - [X] Add max iterations or tolerance stopping for iterative solvers
 - [X] RBF with radius search gives symmetric matrix but difficult to chose threshold?
