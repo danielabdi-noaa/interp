@@ -124,53 +124,41 @@ unsigned int knn_radius(const KDTree& index, double radius, double* query,
  ********************************************************************/
 
 void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
-        VectorXi& clusterAssignments, VectorXi& clusterSizes, MatrixXd& clusterCenters,
-        bool use_random_init = false
+        VectorXi& clusterAssignments, VectorXi& clusterSizes, MatrixXd& clusterCenters
     ) {
 
     std::cout << "Clustering point clouds into " << numClusters << " clusters" << std::endl;
     Timer t;
+    VectorXd d(numDims);
 
-    // Initialize the cluster centers
-    if(use_random_init) {
-        for (int i = 0; i < numClusters; i++) {
-            clusterCenters.col(i) = points.col(rand() % numPoints);
-        }
-    } else {
-        VectorXd mins(numDims), maxs(numDims);
-        for(int j = 0; j < numDims; j++) {
-            mins(j) = points.row(j).minCoeff();
-            maxs(j) = points.row(j).maxCoeff();
-        }
-        static const int lat_partition[] = {
-           0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3,
-              3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-              4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-              4, 4, 4};
-
-        int n_lat = lat_partition[numClusters];
-        int n_lon = (numClusters / n_lat);
-        double lat_d = (maxs(1) - mins(1)) / n_lat;
-        double lon_d = (maxs(0) - mins(0)) / n_lon;
-
-        int count = 0;
-        for (int i = 0; i < n_lat; i++) {
-            for (int j = 0; j < n_lon; j++) {
-                clusterCenters(0,i * n_lon + j) = mins(0) + (lon_d / 2) + j * lon_d;
-                clusterCenters(1,i * n_lon + j) = mins(1) + (lat_d / 2) + i * lat_d;
-                count++;
+    //
+    // Initialize the cluster centers using kMeans++
+    //
+    clusterCenters.col(0) = points.col(rand() % numPoints);
+    for (int i = 1; i < numClusters; i++) {
+        double maxDistance = 0.0;
+        int newCenter;
+#pragma omp parallel for private(d)
+        for (int j = 0; j < numPoints; j++) {
+            double minDistance = std::numeric_limits<double>::max();
+            for (int m = 0; m < i; m++) {
+                d = points.col(j) - clusterCenters.col(m);
+                double distance = d.dot(d);
+                if (distance < minDistance)
+                    minDistance = distance;
+            }
+            if (minDistance > maxDistance) {
+                maxDistance = minDistance;
+                newCenter = j;
             }
         }
-        for(int i = count; i < numClusters; i++) {
-            clusterCenters.col(i) = points.col(rand() % numPoints);
-        }
+        clusterCenters.col(i) = points.col(newCenter);
     }
 
     // Perform k-means clustering until the cluster assignments stop changing
     MatrixXd sumClusterCenters(numDims, numClusters);
-    VectorXd d(numDims);
-
     bool converged = false;
+    int iterations = 0;
     while (!converged) {
 
         // Update the cluster assignments
@@ -207,9 +195,13 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
             if (clusterSizes(i) > 0)
                 clusterCenters.col(i) = sumClusterCenters.col(i) / clusterSizes(i);
         }
+
+
+        iterations++;
     }
 
     //Print final cluster sizes
+    std::cout << "Completed " << iterations << " iterations." << std::endl;
     for (int i = 0; i < numClusters; i++) {
         std::cout << "cluster " << i << " with centroid ("
             << clusterCenters.col(i).transpose() << ") and "
