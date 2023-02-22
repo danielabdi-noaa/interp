@@ -374,7 +374,7 @@ void rbf_build(const KDTree& index, const MatrixXd& X,
 // Solve Ax=b from solver that already has LU decomposed matrix
 // Iterative solvers don't need LU decompostion to happen first
 //
-void rbf_solve(RbfSolver& solver, const VectorXd& F, VectorXd& C) {
+void rbf_solve(RbfSolver& solver, const MatrixXd& F, MatrixXd& C) {
     std::cout << "Started solve ..." << std::endl;
     Timer t;
 
@@ -552,7 +552,7 @@ namespace GlobalData {
           MatrixXd*& points, MatrixXd*& fields
     ) {
         int numPoints = n_lat_i*n_lon_i;
-        numFields = 1;
+        numFields = 2;
 
         // Save global number of points
         g_numPoints = numPoints;
@@ -991,7 +991,7 @@ struct ClusterData {
     //
     void solve_rbf() {
         using namespace GlobalData;
-        VectorXd F(numPoints+monomials);
+        MatrixXd F(numPoints+monomials, numFields);
         MatrixXd W(numPoints+monomials, numFields);
 
         target_fields.setZero();
@@ -999,19 +999,13 @@ struct ClusterData {
         std::cout << "===========================" << std::endl;
 
         //compute weights for each field
-        VectorXd Wf(numPoints+monomials);
         std::cout << "Computing weights for all fields" << std::endl;
         F.setZero();
-        Wf.setZero();
-        for(int f = 0; f < numFields; f++) {
-            F.segment(0,numPoints) = fields.row(f);
-            if(numNeighbors == 1) {
-                W.col(f) = F;
-            } else { 
-                rbf_solve(solver, F, Wf);
-                W.col(f) = Wf;
-            }
-        }
+        F.block(0,0,numPoints,numFields) = fields.transpose();
+        if(numNeighbors == 1)
+            W = F;
+        else
+            rbf_solve(solver, F, W);
 
         //interpolate for target fields
         std::cout << "Interpolating fields" << std::endl;

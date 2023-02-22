@@ -24,7 +24,8 @@ y = np.array(y)
 z = np.array(z)
 
 fig, axs = plt.subplots(1, 1, figsize=[13.63, 10.0])
-#axs.tricontourf(x, y, z, cmap='viridis')
-axs.scatter(x, y, c=z, s=0.03, cmap="viridis")
+#pc = axs.tricontourf(x, y, z, cmap='viridis')
+pc = axs.scatter(x, y, c=z, s=0.03, cmap="viridis")
+fig.colorbar(pc, ax=axs, extend='both')
 
 plt.savefig(args.output)
