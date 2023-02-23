@@ -48,6 +48,7 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
 
 To interpolate from the North-American(NA) domain to the conus domain, we should provide the input grib file and a sample template
 grib file containing the conus grid lat/lon. We can select fields to interpolate by providing comma-separated list with 0-based index.
+For this example, fields UGDR:VGDR:TMP:RH:APCP are selected with their 0-based index in the NA grib file.
 
     $ OMP_NUM_THREADS=2 ./interp -i rrfs_a.t06z.bgdawpf007.tm00.grib2 -t rrfs.t06z.prslev.f007.conus_3km.grib2 -f 16,17,751,754,771
     Threads: 2
@@ -104,7 +105,14 @@ We can also plot the NA input domain
 
     $ python3 plot.py -i input.txt -o na.png
 
-The plotting script will plot all interpolated fields.
+The plotting script will plot all interpolated fields. Here is the plot of relative humidity (RH)
+over the North-American(NA) and Conus grid resp. The odd-looking NA domain is due to the domain
+crossing the north pole.
+<p align="center">
+  <img width="500px" src="./images/field_3_na.png"/>
+  <img width="500px" src="./images/field_3_conus.png"/>
+</p>
+
 
 # To do
 
