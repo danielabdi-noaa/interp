@@ -18,14 +18,15 @@ with open(args.input, "r") as file:
         vals = list(map(float, line.split()))
         x.append(vals[0])
         y.append(vals[1])
-        z.append(vals[2])
+        z.append(vals[2:])
 x = np.array(x)
 y = np.array(y)
 z = np.array(z)
 
-fig, axs = plt.subplots(1, 1, figsize=[13.63, 10.0])
-#pc = axs.tricontourf(x, y, z, cmap='viridis')
-pc = axs.scatter(x, y, c=z, s=0.03, cmap="viridis")
-fig.colorbar(pc, ax=axs, extend='both')
-
-plt.savefig(args.output)
+# Plot all fields
+for i in range(np.size(z,1)):
+    fig, axs = plt.subplots(1, 1, figsize=[13.63, 10.0])
+    #pc = axs.tricontourf(x, y, z[:,i], cmap='viridis')
+    pc = axs.scatter(x, y, c=z[:,i], s=0.03, cmap="viridis")
+    fig.colorbar(pc, ax=axs, extend='both')
+    plt.savefig(f"field_{i}_{args.output}")

@@ -52,6 +52,7 @@ static bool useTestField;
 /*********************
  *  Timer class
  *********************/
+
 class Timer {
 private:
     using Clock = std::chrono::steady_clock;
@@ -402,7 +403,8 @@ namespace GlobalData {
     int numClustersPerRank;
     std::vector<int> field_indices;
 
-    //input/output grid dimensions
+    //input/output grid dimensions used for testing purposes.
+    //if you read grid from grib2 files, these are ignored.
     constexpr double lat_min = -37.0;
     constexpr double lat_max =  37.0;
     constexpr double lon_min =  61.0;
@@ -487,9 +489,9 @@ namespace GlobalData {
                 for(int i = 0; i < n_lat_o; i++) {
                     for(int j = 0; j < n_lon_o; j++) {
                          (*target_points)(0, i * n_lon_o + j) =
-                             lon_min + (j * (lon_max - lon_min))/ (n_lon_o - 1);
+                             lon_min + (j * (lon_max - lon_min)) / (n_lon_o - 1);
                          (*target_points)(1, i * n_lon_o + j) =
-                             lat_min + (i * (lat_max - lat_min))/ (n_lat_o - 1);
+                             lat_min + (i * (lat_max - lat_min)) / (n_lat_o - 1);
                     }
                 }
             } else {

@@ -41,42 +41,70 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
 - [ECMWF eccodes library](https://github.com/ecmwf/eccodes)
 
 ## Build
+
     ./build.sh
+
 ## Run
-    $ OMP_NUM_THREADS=8 ./interp -i rrfs_a.t06z.bgdawpf007.tm00.grib2 -t rrfs.t06z.prslev.f007.ak.grib2 
-    Eigen will be using 1 threads.
+
+To interpolate from the North-American(NA) domain to the conus domain, we should provide the input grib file and a sample template
+grib file containing the conus grid lat/lon. We can select fields to interpolate by providing comma-separated list with 0-based index.
+
+    $ OMP_NUM_THREADS=2 ./interp -i rrfs_a.t06z.bgdawpf007.tm00.grib2 -t rrfs.t06z.prslev.f007.conus_3km.grib2 -f 16,17,751,754,771
+    Threads: 2
     ===== Parameters ====
     numDims: 2
-    numNeighbors: 8
-    numNeighborsTarget: 32
-    rbfShape: 40
+    numNeighbors: 1
+    numNeighborsInterp: 32
+    rbfShape: 0
     useCutoffRadius: false
     cutoffRadius: 0.08
-    cutoffRadiusTarget: 0.64
-    nonParametric: true
-    blendInterp: false
-    numClustersPerRank: 1
-    matEpsilon: 0
+    cutoffRadiusInterp: 0.64
+    numClustersPerRank: 2
     rbfSmoothing: 0
     monomials: 0
     =====================
+    Eigen will be using 1 threads.
     Reading input grib file
-    Finished in 1.43058 secs.
+    Finished in 3.98184 secs.
     Reading interpolation grid from grib file
-    Finished in 0.262793 secs.
+    Finished in 0.331067 secs.
     ===== Data size ====
     numPoints: 14452641
-    numTargetPoints: 1822145
-    numFields: 1
+    numTargetPoints: 1905141
+    numFields: 5
     =====================
     Clustering point clouds into 1 clusters
+    Completed 1 iterations.
     cluster 0 with centroid (246.751 41.7439) and 14452641 points
-    Finished in 0.119363 secs.
+    Finished in 0.105573 secs.
+    Clustering point clouds into 2 clusters
+    Completed 25 iterations.
+    cluster 0 with centroid (294.837 41.6794) and 7238878 points
+    cluster 1 with centroid (198.499 41.8086) and 7213763 points
+    Finished in 3.28064 secs.
+    Automatically computed shape factor: 69.455
     ===========================
+    Computing weights for all fields
+    Automatically computed shape factor: 68.9903
+    ===========================
+    Computing weights for all fields
     Interpolating fields
-    Finished in 3.37725 secs.
+    Interpolating fields
+    Finished in 1.04203 secs.
+    Finished in 3.23271 secs.
     Writing input and output fields for plotting
-    Finished in 9.2294 secs.
+    Finished in 21.4104 secs.
+
+
+To plot interpolation result over the conus domain
+
+    $ python3 plot.py -i output.txt -o conus.png
+
+We can also plot the NA input domain
+
+    $ python3 plot.py -i input.txt -o na.png
+
+The plotting script will plot all interpolated fields.
 
 # To do
 
