@@ -27,9 +27,6 @@ constexpr int numDims = 2;
 //     rbfShape  = 0.8 / average_distance
 // If D is width of the domain
 //     rbfShape = 0.8 / (D / npoints^(1/numDims))
-//  40    2961   =>  number of points in one dimension
-//0.54      40   =>  8 neighbors
-//0.40    29.61  => 32 neighbors
 static double rbfShape;
 
 // Number of neighbors to consider for interpolation
@@ -367,7 +364,7 @@ void rbf_solve(RbfSolver& solver, const MatrixXd& F, MatrixXd& C) {
 
     C = solver.solve(F);
 
-#if 0
+#ifdef ITERATIVE
     std::cout << "----------------------------------" << std::endl;
     std::cout << "numb iterations: " << solver.iterations() << std::endl;
     std::cout << "estimated error: " << solver.error()      << std::endl;
@@ -407,13 +404,13 @@ namespace GlobalData {
 
     //input/output grid dimensions
     constexpr double lat_min = -37.0;
-    constexpr double lat_max = 37.0;
-    constexpr double lon_min = 61.0;
+    constexpr double lat_max =  37.0;
+    constexpr double lon_min =  61.0;
     constexpr double lon_max = 299.0;
-    constexpr int n_lon_i = 4881;
-    constexpr int n_lat_i = 2961;
-    constexpr int n_lon_o = 7000;
-    constexpr int n_lat_o = 3500;
+    constexpr int n_lon_i = 120;
+    constexpr int n_lat_i =  40;
+    constexpr int n_lon_o = 240;
+    constexpr int n_lat_o =  80;
 
     //random points are structured/unstructured
     constexpr bool source_is_structured = true;
@@ -968,8 +965,25 @@ struct ClusterData {
     // or cutoff radius criteria
     //
     void build_rbf() {
+        // Compute rbf shape factor
+        if(rbfShape == 0) {
+            size_t nindex[2];
+            double ndistance[2], total = 0; 
+            VectorXd query(numDims);
+            for (int i = 0; i < numPoints; i++) {
+                query = points.col(i);
+                knn(*ptree, 2, query.data(), &nindex[0], &ndistance[0]);
+                total += sqrt(ndistance[1]);
+            }
+            rbfShape = pow(32.0 / numNeighbors, 0.25) * (0.8 / (total / numPoints));
+            std::cout << "Automatically computed shape factor: " << rbfShape << std::endl;
+        }
+
+        // non-parametric rbf
         if(numNeighbors == 1)
             return;
+
+        // build rbf interpolation matrix
         A.resize(numPoints + monomials, numPoints + monomials);
         rbf_build(*ptree, points, numPoints, solver, A);
     }
@@ -1250,7 +1264,7 @@ int main(int argc, char** argv) {
     numNeighbors = 1;
     numNeighborsInterp = 32;
     numClustersPerRank = 1;
-    rbfShape = 40;
+    rbfShape = 0;
     useCutoffRadius = false;
     cutoffRadius = 0.08;
     cutoffRadiusInterp = 0.64;
