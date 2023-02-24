@@ -542,10 +542,11 @@ namespace GlobalData {
     void write_grib_file(std::string tmpl, std::string dst) {
         Timer t;
 
-        if(dst.empty() || tmpl.empty()) {
-            std::cout << "Writing input and output fields for plotting" << std::endl;
-
-            FILE* fh = fopen("input.txt", "w");
+        if(dst.find("grib") == string::npos) {
+            FILE* fh;
+#if 0
+            std::cout << "Writing input text file" << std::endl;
+            fh = fopen("input.txt", "w");
             for(int i = 0; i < g_numPoints; i++) {
                fprintf(fh, "%.2f %.2f ",
                    (*points_p)(0,i),
@@ -555,8 +556,9 @@ namespace GlobalData {
                fprintf(fh, "\n");
             }
             fclose(fh);
-
-            fh = fopen("output.txt", "w");
+#endif
+            std::cout << "Writing output text file" << std::endl;
+            fh = fopen(dst.empty() ? "output.txt" : dst.c_str(), "w");
             for(int i = 0; i < g_numTargetPoints; i++) {
                fprintf(fh, "%.2f %.2f ",
                  (*target_points_p)(0,i),
