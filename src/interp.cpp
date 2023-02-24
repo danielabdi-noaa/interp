@@ -213,7 +213,7 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
  * Pick a linear equations systems solver from Eigen (direct/iterative)
  **************************************************************/
 
-#ifdef ITERATIVE
+#ifdef USE_ITERATIVE
 typedef BiCGSTAB<SparseMatrix<double>, IncompleteLUT<double,int>> RbfSolver;
 #else
 typedef SparseLU<SparseMatrix<double>> RbfSolver;
@@ -365,7 +365,7 @@ void rbf_solve(RbfSolver& solver, const MatrixXd& F, MatrixXd& C) {
 
     C = solver.solve(F);
 
-#ifdef ITERATIVE
+#ifdef USE_ITERATIVE
     std::cout << "----------------------------------" << std::endl;
     std::cout << "numb iterations: " << solver.iterations() << std::endl;
     std::cout << "estimated error: " << solver.error()      << std::endl;
@@ -1230,7 +1230,7 @@ void usage() {
               << "arguments:" << std::endl
               << "  -h, --help               show this help message and exit" << std::endl
               << "  -i, --input              grib file containing fields to interpolate" << std::endl
-              << "  -o, --output             output grib file contiainig result of interpolation" << std::endl
+              << "  -o, --output             output grib file containing result of interpolation" << std::endl
               << "  -t, --template           template grib file that the output grib file is based on" << std::endl
               << "  -c, --clusters-per-rank  number of clusters per MPI rank" << std::endl
               << "  -f, --fields             comma separated list indices of fields in grib file that are to be interpolated" << std::endl

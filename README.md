@@ -38,11 +38,13 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
 
 ## Requirements
 - [C++ Eigen library](https://eigen.tuxfamily.org/dox/)
-- [ECMWF eccodes library](https://github.com/ecmwf/eccodes)
+- [ECMWF eccodes library](https://github.com/ecmwf/eccodes) - build with `-DENABLE_PNG`
 
 ## Build
 
-    ./build.sh
+    mkdir build && cd build
+    cmake -DCMAKE_BUILD_TYPE=release ..
+    make && make install
 
 ## Run
 
