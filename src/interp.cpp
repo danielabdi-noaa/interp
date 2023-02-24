@@ -2,6 +2,7 @@
 #include <cmath>
 #include <random>
 #include <vector>
+#include <mutex>
 #include <string>
 #include <iostream>
 #include <Eigen/Dense>
@@ -10,6 +11,7 @@
 #include <chrono>
 #include <eccodes.h>
 #include <omp.h>
+
 #include "knn/nanoflann.hpp"
 
 using namespace std;
@@ -49,6 +51,9 @@ static int monomials;
 // Use test function for field initialization
 static bool useTestField;
 
+// mutex for cout 
+static std::mutex cout_mutex;
+
 /*********************
  *  Timer class
  *********************/
@@ -64,7 +69,9 @@ public:
     }
     void elapsed() {
         auto duration = std::chrono::duration_cast<Second>(Clock::now() - m_beg).count();
+        cout_mutex.lock();
         std::cout << "Finished in " << duration << " secs." << std::endl;
+        cout_mutex.unlock();
         reset();
     }
 };
@@ -249,130 +256,6 @@ double rbf(double r_) {
     } else if constexpr(type == IDW) {
         return 1.0 / pow(r,3);
     }
-}
-
-//
-// Build sparse interpolation matrix and LU decompose it
-//
-void rbf_build(const KDTree& index, const MatrixXd& X,
-        const int numPoints, RbfSolver& solver, SparseMatrix<double>& A
-        ) {
-
-    //
-    // Build sparse Matrix of radial basis function evaluations
-    //
-    std::cout << "Constructing interpolation matrix ..." << std::endl;
-    Timer t;
-
-    typedef Eigen::Triplet<double> T;
-    std::vector<T> tripletList;
-    tripletList.reserve(numPoints * numNeighbors + 2 * monomials * numPoints);
-
-    VectorXd query(numDims);
-
-    if(useCutoffRadius) {
-        std::vector<nanoflann::ResultItem<unsigned, double>> matches;
-        for (int i = 0; i < numPoints; i++) {
-            // Perform a radius search
-            query = X.col(i);
-            unsigned nMatches = knn_radius(index, cutoffRadius, query.data(), matches);
-
-            // Compute matrix coefficients
-            double sum = 0;
-            for (int k = 0; k < nMatches; k++) {
-                int j = matches[k].first;
-                double r = rbf(sqrt(matches[k].second));
-                if(i == j)
-                    r += rbfSmoothing;
-                matches[k].second = r;
-                sum += r;
-            }
-
-            // Normalize the coefficients per row
-            for (int k = 0; k < nMatches; k++) {
-                int j = matches[k].first;
-                double r = matches[k].second / sum;
-                tripletList.push_back(T(i,j,r));
-            }
-
-            // Add polynomial
-            for(int j = 0; j < monomials; j++) {
-                tripletList.push_back(T(i,numPoints + j,1));
-                tripletList.push_back(T(numPoints + j,i,1));
-            }
-        }
-    } else {
-        vector<size_t> indices(numNeighbors);
-        vector<double> distances(numNeighbors);
-        for (int i = 0; i < numPoints; i++) {
-
-            // Perform the k-nearest neighbor search
-            query = X.col(i);
-            knn(index, numNeighbors, query.data(), &indices[0], &distances[0]);
-
-            // Compute matrix coefficients
-            double sum = 0;
-            for (int k = 0; k < numNeighbors; k++) {
-                int j = indices[k];
-                double r = rbf(sqrt(distances[k]));
-                if(i == j)
-                    r += rbfSmoothing;
-                distances[k] = r;
-                sum += r;
-            }
-
-            // Normalize the coefficients per row
-            for (int k = 0; k < numNeighbors; k++) {
-                int j = indices[k];
-                double r = distances[k] / sum;
-                tripletList.push_back(T(i,j,r));
-            }
-
-            // Add polynomial
-            for(int j = 0; j < monomials; j++) {
-                tripletList.push_back(T(i,numPoints + j,1));
-                tripletList.push_back(T(numPoints + j,i,1));
-            }
-        }
-    }
-
-    A.setFromTriplets(tripletList.begin(), tripletList.end());
-
-    t.elapsed();
-
-    //
-    // LU decomposition of the interpolation matrix
-    //
-    std::cout << "Started factorization ..." << std::endl;
-
-    solver.compute(A);
-
-    if(solver.info() != Success) {
-        std::cout << "Factorization failed." << std::endl;
-        exit(0);
-    }
-
-    t.elapsed();
-}
-
-//
-// Solve Ax=b from solver that already has LU decomposed matrix
-// Iterative solvers don't need LU decompostion to happen first
-//
-void rbf_solve(RbfSolver& solver, const MatrixXd& F, MatrixXd& C) {
-    std::cout << "Started solve ..." << std::endl;
-    Timer t;
-
-    C = solver.solve(F);
-
-#ifdef USE_ITERATIVE
-    std::cout << "----------------------------------" << std::endl;
-    std::cout << "numb iterations: " << solver.iterations() << std::endl;
-    std::cout << "estimated error: " << solver.error()      << std::endl;
-    std::cout << "----------------------------------" << std::endl;
-#endif
-
-    t.elapsed();
 }
 
 /**************************
@@ -937,7 +820,7 @@ struct ClusterData {
     void gather() {
         using namespace GlobalData;
 
-        //offsets and coutns
+        //offsets and counts
         VectorXi offsets(numClusters);
         VectorXi counts(numClusters);
 
@@ -955,6 +838,138 @@ struct ClusterData {
                 MPI_DOUBLE, 0, MPI_COMM_WORLD);
     }
     //
+    // Build sparse interpolation matrix and LU decompose it
+    //
+    void rbf_build() {
+    
+        //
+        // Build sparse Matrix of radial basis function evaluations
+        //
+        cout_mutex.lock();
+        std::cout << "Constructing interpolation matrix ..." << std::endl;
+        cout_mutex.unlock();
+    
+        Timer t;
+        typedef Eigen::Triplet<double> T;
+        std::vector<T> tripletList;
+        tripletList.reserve(numPoints * numNeighbors + 2 * monomials * numPoints);
+    
+        VectorXd query(numDims);
+    
+        if(useCutoffRadius) {
+            std::vector<nanoflann::ResultItem<unsigned, double>> matches;
+            for (int i = 0; i < numPoints; i++) {
+                // Perform a radius search
+                query = points.col(i);
+                unsigned nMatches = knn_radius(*ptree, cutoffRadius, query.data(), matches);
+    
+                // Compute matrix coefficients
+                double sum = 0;
+                for (int k = 0; k < nMatches; k++) {
+                    int j = matches[k].first;
+                    double r = rbf(sqrt(matches[k].second));
+                    if(i == j)
+                        r += rbfSmoothing;
+                    matches[k].second = r;
+                    sum += r;
+                }
+    
+                // Normalize the coefficients per row
+                for (int k = 0; k < nMatches; k++) {
+                    int j = matches[k].first;
+                    double r = matches[k].second / sum;
+                    tripletList.push_back(T(i,j,r));
+                }
+    
+                // Add polynomial
+                for(int j = 0; j < monomials; j++) {
+                    tripletList.push_back(T(i,numPoints + j,1));
+                    tripletList.push_back(T(numPoints + j,i,1));
+                }
+            }
+        } else {
+            vector<size_t> indices(numNeighbors);
+            vector<double> distances(numNeighbors);
+            for (int i = 0; i < numPoints; i++) {
+    
+                // Perform the k-nearest neighbor search
+                query = points.col(i);
+                knn(*ptree, numNeighbors, query.data(), &indices[0], &distances[0]);
+    
+                // Compute matrix coefficients
+                double sum = 0;
+                for (int k = 0; k < numNeighbors; k++) {
+                    int j = indices[k];
+                    double r = rbf(sqrt(distances[k]));
+                    if(i == j)
+                        r += rbfSmoothing;
+                    distances[k] = r;
+                    sum += r;
+                }
+    
+                // Normalize the coefficients per row
+                for (int k = 0; k < numNeighbors; k++) {
+                    int j = indices[k];
+                    double r = distances[k] / sum;
+                    tripletList.push_back(T(i,j,r));
+                }
+    
+                // Add polynomial
+                for(int j = 0; j < monomials; j++) {
+                    tripletList.push_back(T(i,numPoints + j,1));
+                    tripletList.push_back(T(numPoints + j,i,1));
+                }
+            }
+        }
+    
+        A.setFromTriplets(tripletList.begin(), tripletList.end());
+    
+        t.elapsed();
+    
+        //
+        // LU decomposition of the interpolation matrix
+        //
+        cout_mutex.lock();
+        std::cout << "Started factorization ..." << std::endl;
+        cout_mutex.unlock();
+    
+        solver.compute(A);
+    
+        if(solver.info() != Success) {
+            std::cout << "Factorization failed." << std::endl;
+            exit(0);
+        }
+    
+        t.elapsed();
+    }
+    
+    //
+    // Solve Ax=b from solver that already has LU decomposed matrix
+    // Iterative solvers don't need LU decompostion to happen first
+    //
+    void rbf_solve(const MatrixXd& F, MatrixXd& C) {
+    
+        cout_mutex.lock();
+        std::cout << "Started solve ..." << std::endl;
+        cout_mutex.unlock();
+    
+        Timer t;
+    
+        C = solver.solve(F);
+    
+    #ifdef USE_ITERATIVE
+        cout_mutex.lock();
+        std::cout << "----------------------------------" << std::endl;
+        std::cout << "numb iterations: " << solver.iterations() << std::endl;
+        std::cout << "estimated error: " << solver.error()      << std::endl;
+        std::cout << "----------------------------------" << std::endl;
+        cout_mutex.lock();
+    #endif
+    
+        t.elapsed();
+    }
+
+    //
     // Build KD tree needed for fast nearest neighbor search
     //
     void build_kdtree() {
@@ -967,6 +982,7 @@ struct ClusterData {
     // or cutoff radius criteria
     //
     void build_rbf() {
+
         // Compute rbf shape factor
         if(rbfShape == 0) {
             size_t nindex[2];
@@ -978,7 +994,10 @@ struct ClusterData {
                 total += sqrt(ndistance[1]);
             }
             rbfShape = pow(32.0 / numNeighbors, 0.25) * (0.8 / (total / numPoints));
+
+            cout_mutex.lock();
             std::cout << "Automatically computed shape factor: " << rbfShape << std::endl;
+            cout_mutex.unlock();
         }
 
         // non-parametric rbf
@@ -987,7 +1006,7 @@ struct ClusterData {
 
         // build rbf interpolation matrix
         A.resize(numPoints + monomials, numPoints + monomials);
-        rbf_build(*ptree, points, numPoints, solver, A);
+        rbf_build();
     }
     //
     // Interpolate each field using parameteric RBF
@@ -999,19 +1018,24 @@ struct ClusterData {
 
         target_fields.setZero();
 
-        std::cout << "===========================" << std::endl;
-
         //compute weights for each field
+        cout_mutex.lock();
+        std::cout << "===========================" << std::endl;
         std::cout << "Computing weights for all fields" << std::endl;
+        cout_mutex.unlock();
+
         F.setZero();
         F.block(0,0,numPoints,numFields) = fields.transpose();
         if(numNeighbors == 1)
             W = F;
         else
-            rbf_solve(solver, F, W);
+            rbf_solve(F, W);
 
         //interpolate for target fields
+        cout_mutex.lock();
         std::cout << "Interpolating fields" << std::endl;
+        cout_mutex.unlock();
+
         Timer t;
 
         if(useCutoffRadius) {

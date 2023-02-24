@@ -10,9 +10,14 @@ find_package( MPI COMPONENTS CXX)
 find_package (Eigen3 3.3 REQUIRED NO_MODULE)
 find_package (eccodes COMPONENTS C REQUIRED)
 
-# set compiler flags
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} \
-    -O3 -funroll-loops -march=native -DNDEBUG")
+# set release compiler flags
+if (CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} \
+        -O3 -funroll-loops -march=native -DNDEBUG")
+elseif (CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} \
+        -O3 -unroll -xHost -DNDEBUG")
+endif()
 
 # add subdirectories
 add_subdirectory(src)
