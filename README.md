@@ -36,6 +36,14 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
       -utf, --use-test-field   use test field function for initializing fields (applies even if grib2 file input is used)
                                this could be useful for tuning parameters with L2 error of ground truth.
 
+The most important parameters affecting performance and accuracy are `--rbf-shape`, `--neighbors` and `--neighbors-interp`.
+The RBF shape factor if automatically set if you don't provide one, however, you may want to tune that value later.
+The number of neighbors is set to 1 by default, meaning a non-parameteric version, which is very fast since it does not
+solve a linear system of equations. This is similar to inverse distance weighting interpolation. 
+Increase the number of neighbors progressively to see how it affects the error of interpolation.
+The number of neighbors used during actual interpolation `--neighbors-interp` has some effect on performance, although
+not as much as `--neighbors`. In general the more neighbors used, the smoother the interpolation.
+
 ## Requirements
 - [C++ Eigen library](https://eigen.tuxfamily.org/dox/)
 - [ECMWF eccodes library](https://github.com/ecmwf/eccodes) - build with `-DENABLE_PNG`

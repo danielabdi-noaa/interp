@@ -538,7 +538,7 @@ namespace GlobalData {
           MatrixXd*& points, MatrixXd*& fields
     ) {
         int numPoints = n_lat_i*n_lon_i;
-        numFields = 2;
+        numFields = 1;
 
         // Save global number of points
         g_numPoints = numPoints;
