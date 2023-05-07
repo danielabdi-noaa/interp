@@ -22,7 +22,7 @@ if (TARGET Eigen3::Eigen)
     target_link_libraries (interp PUBLIC Eigen3::Eigen)
 endif()
 if(eccodes_FOUND)
-    target_link_libraries (interp PUBLIC eccodes)
+    target_link_libraries (interp PUBLIC ${ECCODES_LIBRARIES})
 endif()
 
 # install
