@@ -9,7 +9,9 @@
 #include <Eigen/Sparse>
 #include <mpi.h>
 #include <chrono>
+#if ENABLE_GRIB
 #include <eccodes.h>
+#endif
 #include <omp.h>
 
 #include "knn/nanoflann.hpp"
@@ -320,6 +322,7 @@ namespace GlobalData {
         Timer t;
 
         if(!tmpl.empty()) {
+#if ENABLE_GRIB
             if(tmpl.find("grib") != string::npos) {
                 std::cout << "Reading interpolation grid from grib file" << std::endl;
                 FILE* fp = fopen(tmpl.c_str(), "r");
@@ -343,7 +346,9 @@ namespace GlobalData {
                 target_points->row(1) = lats;
 
                 codes_handle_delete(h);
-            } else {
+            } else
+#endif
+            {
                 std::cout << "Reading interpolation grid from text file" << std::endl;
 
                 FILE* fh = fopen(tmpl.c_str(), "r");
@@ -508,7 +513,9 @@ namespace GlobalData {
                 }
             }
         // Grib2 file
-        } else {
+        } 
+#if ENABLE_GRIB
+        else {
             std::cout << "Reading input grib file" << std::endl;
 
             size_t numPoints;
@@ -573,6 +580,7 @@ namespace GlobalData {
                 }
             }
         }
+#endif
 
         // Close file
         fclose(fp);
@@ -619,7 +627,9 @@ namespace GlobalData {
             }
             fclose(fp);
         // Grib2 ouptput file
-        } else {
+        }
+#if ENABLE_GRIB
+        else {
             std::cout << "Writing output grib file." << std::endl;
 
             FILE* fp = fopen(tmpl.c_str(), "r");
@@ -659,6 +669,7 @@ namespace GlobalData {
               if(idx >= numFields) break;
             }
         }
+#endif
 
         t.elapsed();
     }
@@ -1332,7 +1343,7 @@ void merge_cluster(ClusterData& parent, int numClusters,
  *****************/
 
 void usage() {
-    std::cout << "Interpolate fields in a grib2 file onto another grid or scattered observation locations." << std::endl << std::endl
+    std::cout << "Interpolate fields in a grib2 or other format file onto another grid or scattered locations." << std::endl << std::endl
               << "Example:" << std::endl
               << "    OMP_NUM_THREADS=8 ./interp -i rrfs_a.t06z.bgdawpf007.tm00.grib2 -t rrfs.t06z.prslev.f007.ak.grib2 -f 0,3" << std::endl << std::endl
               << "This does interpolation of fields 0 and 3 using 8 threads from the North-american domain to the Alaska grid." << std::endl << std::endl

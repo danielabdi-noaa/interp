@@ -6,7 +6,6 @@ file(GLOB SOURCES "*.cpp")
 add_executable(interp ${SOURCES})
 
 # compiler definitions
-option(USE_ITERATIVE "Use iterative solver" OFF)
 if(USE_ITERATIVE)
     target_compile_definitions(interp PRIVATE USE_ITERATIVE)
 endif()

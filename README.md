@@ -1,9 +1,9 @@
 # interp
 A simple RBF interpolation utility considering only k nearest neighbors.
 It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header only) for nearest neighbor search.
-`nanoflann` comes included with the distribution so it is not technically a dependency.
+`nanoflann` comes included with the distribution so it is technically not a dependency.
 
-    Interpolate fields in a grib2 file onto another grid or scattered observation locations.
+    Interpolate fields in a grib2 or other format file onto another grid or scattered locations.
     
     Example:
         OMP_NUM_THREADS=8 ./interp -i rrfs_a.t06z.bgdawpf007.tm00.grib2 -t rrfs.t06z.prslev.f007.ak.grib2 -f 0,3
@@ -18,10 +18,10 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
     
     arguments:
       -h, --help               show this help message and exit
-      -i, --input              grib file containing fields to interpolate
-      -o, --output             output grib file contiainig result of interpolation
-      -t, --template           template grib file that the output grib file is based on
-      -c, --clusters-per-rank  number of clusters per MPI rank
+      -i, --input              grib or other text/binary file containing coordinates and fields to interpolate
+      -o, --output             output grib or other text/binary file containing result of interpolation
+      -t, --template           template grib file that the output grib file is to be based upon
+      -c, --clusters-per-rank  number of point clusters (point clouds) per MPI rank
       -f, --fields             comma separated list indices of fields in grib file that are to be interpolated
                                hyphen(-) can be used to indicate range of fields e.g. 0-3 means fields 0,1,2
                                question(?) can be used to indicate all fields in a grib file
@@ -53,6 +53,10 @@ not as much as `--neighbors`. In general the more neighbors used, the smoother t
     mkdir build && cd build
     cmake -DCMAKE_BUILD_TYPE=release ..
     make && make install
+
+If you don't need grib2 support via eccodes
+
+    cmake -DCMAKE_BUILD_TYPE=release -DENABLE_GRIB=OFF ..
 
 ## Run
 
