@@ -614,14 +614,14 @@ namespace GlobalData {
             size_t elements_written = 0;
             elements_written += fwrite(&g_numTargetPoints, sizeof(g_numTargetPoints), 1, fp);
             elements_written += fwrite(&numFields, sizeof(numFields), 1, fp);
-            for(int i = 0; i < g_numPoints; i++) {
+            for(int i = 0; i < g_numTargetPoints; i++) {
                double v;
                for(int j = 0; j < numDims; j++) {
-                   v = (*points_p)(j,i);
+                   v = (*target_points_p)(j,i);
                    elements_written += fwrite(&v, sizeof(v), 1, fp);
                }
                for(int j = 0; j < numFields; j++) {
-                   v = (*fields_p)(j,i);
+                   v = (*target_fields_p)(j,i);
                    elements_written += fwrite(&v, sizeof(v), 1, fp);
                }
             }

@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import argparse
+import struct
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -13,17 +14,29 @@ args = parser.parse_args()
 
 # Read input data from text file
 x, y, z = [], [], []
-with open(args.input, "r") as file:
-    first = True
-    for line in file:
-        if first:
-            first = False
-            pass
-        else:
-            vals = list(map(float, line.split()))
-            x.append(vals[0])
-            y.append(vals[1])
-            z.append(vals[2:])
+
+if "txt" in args.input:
+    with open(args.input, "r") as file:
+        first = True
+        for line in file:
+            if first:
+                first = False
+                pass
+            else:
+                vals = list(map(float, line.split()))
+                x.append(vals[0])
+                y.append(vals[1])
+                z.append(vals[2:])
+else:
+    with open(args.input, 'rb') as file:
+        numPoints, numFields = struct.unpack('ii', file.read(8))
+        for i in range(numPoints):
+            buffer = file.read((2+numFields)*8)
+            xi, yi, *zi = struct.unpack('dd' + 'd'*numFields, buffer)
+            x.append(xi)
+            y.append(yi)
+            z.append(zi)
+
 x = np.array(x)
 y = np.array(y)
 z = np.array(z)
