@@ -356,11 +356,12 @@ namespace GlobalData {
                 }
 
                 while(fgets(buffer, 256, fh)) {
-                   double lat,lon;
-                   sscanf(buffer, "%lf %lf", &lat, &lon);
-                   (*target_points)(0, idx) = lon;
-                   (*target_points)(1, idx) = lat;
-                   idx++;
+                    for(int i = 0; i < numDims; i++) {
+                        double v;
+                        sscanf(buffer, "%lf", &v);
+                        (*target_points)(i, idx) = v;
+                    }
+                    idx++;
                 }
             }
         } else {
@@ -481,10 +482,9 @@ namespace GlobalData {
             fields = new MatrixXd(numFields, g_numPoints);
 
             for(int i = 0; i < g_numPoints; i++) {
-               elements_read += fscanf(fp, "%lf %lf",
-                   &((*points)(0,i)),
-                   &((*points)(1,i)));
-               for(int j = 0; j < numFields; j++)
+                for(int j = 0; j < numDims; j++)
+                   elements_read += fscanf(fp, "%lf", &((*points)(j,i)));
+                for(int j = 0; j < numFields; j++)
                    elements_read += fscanf(fp, "%lf", &((*fields)(j,i)));
             }
         // Bindary input file
@@ -497,15 +497,15 @@ namespace GlobalData {
             fields = new MatrixXd(numFields, g_numPoints);
 
             for(int i = 0; i < g_numPoints; i++) {
-               double v;
-               elements_read += fread(&v, sizeof(v), 1, fp);
-               (*points)(0,i) = v;
-               elements_read += fread(&v, sizeof(v), 1, fp);
-               (*points)(1,i) = v;
-               for(int j = 0; j < numFields; j++) {
-                   elements_read += fread(&v, sizeof(v), 1, fp);
-                   (*fields)(j,i) = v;
-               }
+                double v;
+                for(int j = 0; j < numDims; j++) {
+                    elements_read += fread(&v, sizeof(v), 1, fp);
+                    (*points)(j,i) = v;
+                }
+                for(int j = 0; j < numFields; j++) {
+                    elements_read += fread(&v, sizeof(v), 1, fp);
+                    (*fields)(j,i) = v;
+                }
             }
         // Grib2 file
         } else {
@@ -577,46 +577,6 @@ namespace GlobalData {
         // Close file
         fclose(fp);
         t.elapsed();
-
-#if 0
-        // Write input file in text format
-        {
-            std::cout << "Writing input text file" << std::endl;
-            FILE* fp = fopen("input.txt", "w");
-            fprintf(fp, "%d %d\n", g_numPoints, numFields);
-            for(int i = 0; i < g_numPoints; i++) {
-               fprintf(fp, "%.2f %.2f ",
-                   (*points)(0,i),
-                   (*points)(1,i));
-               for(int j = 0; j < numFields; j++)
-                   fprintf(fp, "%.2f ", (*fields)(j,i));
-               fprintf(fp, "\n");
-            }
-            fclose(fp);
-        }
-        // Write input file in binary format
-        {
-            std::cout << "Writing input binary file" << std::endl;
-            FILE* fp = fopen("input.bin", "wb");
-            size_t elements_written = 0;
-            elements_written += fwrite(&g_numPoints, sizeof(g_numPoints), 1, fp);
-            elements_written += fwrite(&numFields, sizeof(numFields), 1, fp);
-            for(int i = 0; i < g_numPoints; i++) {
-               double v;
-               v = (*points)(0,i);
-               elements_written += fwrite(&v, sizeof(v), 1, fp);
-               v = (*points)(1,i);
-               elements_written += fwrite(&v, sizeof(v), 1, fp);
-               for(int j = 0; j < numFields; j++) {
-                   v = (*fields)(j,i);
-                   elements_written += fwrite(&v, sizeof(v), 1, fp);
-               }
-            }
-            fclose(fp);
-        }
-        exit(0);
-#endif
-
     }
 
     //
@@ -631,9 +591,8 @@ namespace GlobalData {
             FILE* fp = fopen(dst.empty() ? "output.txt" : dst.c_str(), "w");
             fprintf(fp, "%d %d\n", g_numTargetPoints, numFields);
             for(int i = 0; i < g_numTargetPoints; i++) {
-               fprintf(fp, "%.2f %.2f ",
-                 (*target_points_p)(0,i),
-                 (*target_points_p)(1,i));
+               for(int j = 0; j < numDims; j++)
+                   fprintf(fp, "%.2f ", (*target_points_p)(j,i));
                for(int j = 0; j < numFields; j++)
                    fprintf(fp, "%.2f ", (*target_fields_p)(j,i));
                fprintf(fp, "\n");
@@ -649,10 +608,10 @@ namespace GlobalData {
             elements_written += fwrite(&numFields, sizeof(numFields), 1, fp);
             for(int i = 0; i < g_numPoints; i++) {
                double v;
-               v = (*points_p)(0,i);
-               elements_written += fwrite(&v, sizeof(v), 1, fp);
-               v = (*points_p)(1,i);
-               elements_written += fwrite(&v, sizeof(v), 1, fp);
+               for(int j = 0; j < numDims; j++) {
+                   v = (*points_p)(j,i);
+                   elements_written += fwrite(&v, sizeof(v), 1, fp);
+               }
                for(int j = 0; j < numFields; j++) {
                    v = (*fields_p)(j,i);
                    elements_written += fwrite(&v, sizeof(v), 1, fp);
@@ -786,6 +745,44 @@ namespace GlobalData {
         else
             read_grib_file(src, points, fields);
 
+#if 0
+        // Write input file in text format
+        {
+            std::cout << "Writing input text file" << std::endl;
+            FILE* fp = fopen("input.txt", "w");
+            fprintf(fp, "%d %d\n", g_numPoints, numFields);
+            for(int i = 0; i < g_numPoints; i++) {
+               fprintf(fp, "%.2f %.2f ",
+                   (*points)(0,i),
+                   (*points)(1,i));
+               for(int j = 0; j < numFields; j++)
+                   fprintf(fp, "%.2f ", (*fields)(j,i));
+               fprintf(fp, "\n");
+            }
+            fclose(fp);
+        }
+        // Write input file in binary format
+        {
+            std::cout << "Writing input binary file" << std::endl;
+            FILE* fp = fopen("input.bin", "wb");
+            size_t elements_written = 0;
+            elements_written += fwrite(&g_numPoints, sizeof(g_numPoints), 1, fp);
+            elements_written += fwrite(&numFields, sizeof(numFields), 1, fp);
+            for(int i = 0; i < g_numPoints; i++) {
+               double v;
+               v = (*points)(0,i);
+               elements_written += fwrite(&v, sizeof(v), 1, fp);
+               v = (*points)(1,i);
+               elements_written += fwrite(&v, sizeof(v), 1, fp);
+               for(int j = 0; j < numFields; j++) {
+                   v = (*fields)(j,i);
+                   elements_written += fwrite(&v, sizeof(v), 1, fp);
+               }
+            }
+            fclose(fp);
+        }
+        exit(0);
+#endif
         // read target points
         read_target_points(target_points, tmpl);
 
@@ -1346,10 +1343,10 @@ void usage() {
               << "                     [--cutoff-radius CUTOFF_RADIUS] [--cutoff-radius-interp CUTOFF_RADIUS_INTERP]" << std::endl << std::endl
               << "arguments:" << std::endl
               << "  -h, --help               show this help message and exit" << std::endl
-              << "  -i, --input              grib file containing fields to interpolate" << std::endl
-              << "  -o, --output             output grib file containing result of interpolation" << std::endl
-              << "  -t, --template           template grib file that the output grib file is based on" << std::endl
-              << "  -c, --clusters-per-rank  number of clusters per MPI rank" << std::endl
+              << "  -i, --input              grib or other text/binary file containing coordinates and fields to interpolate" << std::endl
+              << "  -o, --output             output grib or other text/binary file containing result of interpolation" << std::endl
+              << "  -t, --template           template grib file that the output grib file is to be based upon" << std::endl
+              << "  -c, --clusters-per-rank  number of point clusters (point clouds) per MPI rank" << std::endl
               << "  -f, --fields             comma separated list indices of fields in grib file that are to be interpolated" << std::endl
               << "                           hyphen(-) can be used to indicate range of fields e.g. 0-3 means fields 0,1,2" << std::endl
               << "                           question(?) can be used to indicate all fields in a grib file" << std::endl

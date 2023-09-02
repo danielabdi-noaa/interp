@@ -14,11 +14,16 @@ args = parser.parse_args()
 # Read input data from text file
 x, y, z = [], [], []
 with open(args.input, "r") as file:
+    first = True
     for line in file:
-        vals = list(map(float, line.split()))
-        x.append(vals[0])
-        y.append(vals[1])
-        z.append(vals[2:])
+        if first:
+            first = False
+            pass
+        else:
+            vals = list(map(float, line.split()))
+            x.append(vals[0])
+            y.append(vals[1])
+            z.append(vals[2:])
 x = np.array(x)
 y = np.array(y)
 z = np.array(z)
@@ -32,7 +37,7 @@ for i in range(np.size(z,1)):
     zi = z[filt,i]
 
     fig, axs = plt.subplots(1, 1, figsize=[13.63, 10.0])
-    #pc = axs.tricontourf(xi, yi, zi, cmap='viridis')
-    pc = axs.scatter(xi, yi, c=zi, s=0.03, cmap="viridis")
+    pc = axs.tricontourf(xi, yi, zi, cmap='viridis')
+    #pc = axs.scatter(xi, yi, c=zi, s=0.03, cmap="viridis")
     fig.colorbar(pc, ax=axs, extend='both')
     plt.savefig(f"field_{i}_{args.output}")
