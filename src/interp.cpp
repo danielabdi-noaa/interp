@@ -322,12 +322,12 @@ namespace GlobalData {
         if(!tmpl.empty()) {
             if(tmpl.find("grib") != string::npos) {
                 std::cout << "Reading interpolation grid from grib file" << std::endl;
-                FILE* fp_s = fopen(tmpl.c_str(), "r");
-                if(!fp_s) return;
+                FILE* fp = fopen(tmpl.c_str(), "r");
+                if(!fp) return;
                 int ret;
                 long numTargetPoints;
 
-                codes_handle* h = codes_handle_new_from_file(0, fp_s, PRODUCT_GRIB, &ret);
+                codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret);
 
                 CODES_CHECK(codes_get_long(h, "numberOfPoints", &numTargetPoints), 0);
                 g_numTargetPoints = numTargetPoints;
@@ -459,81 +459,164 @@ namespace GlobalData {
           std::string src,
           MatrixXd*& points, MatrixXd*& fields
     ) {
-        // Get the number of points
-        FILE* fp = fopen(src.c_str(), "r");
+        Timer t;
+
+        // Open input file
+        std::string mode = "r";
+        if(src.find("txt") == string::npos)
+            mode = "rb";
+
+        FILE* fp = fopen(src.c_str(), mode.c_str());
         if(!fp) {
             std::cout << "Input file: " << src << " not found!";
             exit(0);
         }
 
-        Timer t;
-        size_t numPoints;
-        int ret;
+        // Text input file
+        if(src.find("txt") != string::npos) {
+            std::cout << "Reading input text file" << std::endl;
+            size_t elements_read = 0;
+            elements_read += fscanf(fp, "%d %d", &g_numPoints, &numFields);
+            points = new MatrixXd(numDims, g_numPoints);
+            fields = new MatrixXd(numFields, g_numPoints);
 
-        std::cout << "Reading input grib file" << std::endl;
-
-        // count number of fileds
-        numFields = field_indices.size();
-        if(numFields == 0) {
-            if (codes_count_in_file(0, fp, &numFields) != 0) {
-                std::cout << "Failed to get field count" << std::endl;
-                exit(0);
+            for(int i = 0; i < g_numPoints; i++) {
+               elements_read += fscanf(fp, "%lf %lf",
+                   &((*points)(0,i)),
+                   &((*points)(1,i)));
+               for(int j = 0; j < numFields; j++)
+                   elements_read += fscanf(fp, "%lf", &((*fields)(j,i)));
             }
-            for(int i = 0; i < numFields; i++)
-                field_indices.push_back(i);
-        }
+        // Bindary input file
+        } else if(src.find("grib") == string::npos) {
+            std::cout << "Reading input binary file" << std::endl;
+            size_t elements_read = 0;
+            elements_read += fread(&g_numPoints, sizeof(g_numPoints), 1, fp);
+            elements_read += fread(&numFields, sizeof(numFields), 1, fp);
+            points = new MatrixXd(numDims, g_numPoints);
+            fields = new MatrixXd(numFields, g_numPoints);
 
-        // read lat/lon
-        {
-          codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret);
-
-          long np;
-          CODES_CHECK(codes_get_long(h, "numberOfPoints", &np), 0);
-          numPoints = np;
-
-          // Allocate
-          points = new MatrixXd(numDims, numPoints);
-          fields = new MatrixXd(numFields, numPoints);
-
-          // Get latitude and longitude
-          VectorXd lons, lats, values;
-          lons.resize(numPoints);
-          lats.resize(numPoints);
-          values.resize(numPoints);
-          CODES_CHECK(codes_grib_get_data(h, lats.data(), lons.data(), values.data()), 0);
-          lons = (lons.array() < 0).select(lons.array() + 360, lons.array());
-          points->row(0) = lons;
-          points->row(1) = lats;
-
-          codes_handle_delete(h);
-
-          rewind(fp);
-        }
-        g_numPoints = numPoints;
-
-        if(useTestField) {
-            // Compute test field values at given locations
-            compute_test_fields(numPoints,*points,*fields);
+            for(int i = 0; i < g_numPoints; i++) {
+               double v;
+               elements_read += fread(&v, sizeof(v), 1, fp);
+               (*points)(0,i) = v;
+               elements_read += fread(&v, sizeof(v), 1, fp);
+               (*points)(1,i) = v;
+               for(int j = 0; j < numFields; j++) {
+                   elements_read += fread(&v, sizeof(v), 1, fp);
+                   (*fields)(j,i) = v;
+               }
+            }
+        // Grib2 file
         } else {
-            // loop through all fields and read data
-            VectorXd values(numPoints);
-            int idx = 0, f = 0;
-            while (codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret)) {
+            std::cout << "Reading input grib file" << std::endl;
 
-              if(f < numFields && idx == field_indices[f]) {
-                CODES_CHECK(codes_get_double_array(h, "values",
-                            values.data(), &numPoints), 0);
+            size_t numPoints;
+            int ret;
+            numFields = field_indices.size();
+            if(numFields == 0) {
+                if (codes_count_in_file(0, fp, &numFields) != 0) {
+                    std::cout << "Failed to get field count" << std::endl;
+                    exit(0);
+                }
+                for(int i = 0; i < numFields; i++)
+                    field_indices.push_back(i);
+            }
 
-                fields->row(f) = values;
-                f++;
-              }
+            // read lat/lon
+            {
+              codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret);
+
+              long np;
+              CODES_CHECK(codes_get_long(h, "numberOfPoints", &np), 0);
+              numPoints = np;
+
+              // Allocate
+              points = new MatrixXd(numDims, numPoints);
+              fields = new MatrixXd(numFields, numPoints);
+
+              // Get latitude and longitude
+              VectorXd lons, lats, values;
+              lons.resize(numPoints);
+              lats.resize(numPoints);
+              values.resize(numPoints);
+              CODES_CHECK(codes_grib_get_data(h, lats.data(), lons.data(), values.data()), 0);
+              lons = (lons.array() < 0).select(lons.array() + 360, lons.array());
+              points->row(0) = lons;
+              points->row(1) = lats;
 
               codes_handle_delete(h);
-              idx++;
+
+              rewind(fp);
+            }
+            g_numPoints = numPoints;
+
+            if(useTestField) {
+                // Compute test field values at given locations
+                compute_test_fields(numPoints,*points,*fields);
+            } else {
+                // loop through all fields and read data
+                VectorXd values(numPoints);
+                int idx = 0, f = 0;
+                while (codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret)) {
+
+                  if(f < numFields && idx == field_indices[f]) {
+                    CODES_CHECK(codes_get_double_array(h, "values",
+                                values.data(), &numPoints), 0);
+
+                    fields->row(f) = values;
+                    f++;
+                  }
+
+                  codes_handle_delete(h);
+                  idx++;
+                }
             }
         }
 
+        // Close file
+        fclose(fp);
         t.elapsed();
+
+#if 0
+        // Write input file in text format
+        {
+            std::cout << "Writing input text file" << std::endl;
+            FILE* fp = fopen("input.txt", "w");
+            fprintf(fp, "%d %d\n", g_numPoints, numFields);
+            for(int i = 0; i < g_numPoints; i++) {
+               fprintf(fp, "%.2f %.2f ",
+                   (*points)(0,i),
+                   (*points)(1,i));
+               for(int j = 0; j < numFields; j++)
+                   fprintf(fp, "%.2f ", (*fields)(j,i));
+               fprintf(fp, "\n");
+            }
+            fclose(fp);
+        }
+        // Write input file in binary format
+        {
+            std::cout << "Writing input binary file" << std::endl;
+            FILE* fp = fopen("input.bin", "wb");
+            size_t elements_written = 0;
+            elements_written += fwrite(&g_numPoints, sizeof(g_numPoints), 1, fp);
+            elements_written += fwrite(&numFields, sizeof(numFields), 1, fp);
+            for(int i = 0; i < g_numPoints; i++) {
+               double v;
+               v = (*points)(0,i);
+               elements_written += fwrite(&v, sizeof(v), 1, fp);
+               v = (*points)(1,i);
+               elements_written += fwrite(&v, sizeof(v), 1, fp);
+               for(int j = 0; j < numFields; j++) {
+                   v = (*fields)(j,i);
+                   elements_written += fwrite(&v, sizeof(v), 1, fp);
+               }
+            }
+            fclose(fp);
+        }
+        exit(0);
+#endif
+
     }
 
     //
@@ -542,43 +625,51 @@ namespace GlobalData {
     void write_grib_file(std::string tmpl, std::string dst) {
         Timer t;
 
-        if(dst.find("grib") == string::npos) {
-            FILE* fh;
-#if 0
-            std::cout << "Writing input text file" << std::endl;
-            fh = fopen("input.txt", "w");
-            for(int i = 0; i < g_numPoints; i++) {
-               fprintf(fh, "%.2f %.2f ",
-                   (*points_p)(0,i),
-                   (*points_p)(1,i));
-               for(int j = 0; j < numFields; j++)
-                   fprintf(fh, "%.2f ", (*fields_p)(j,i));
-               fprintf(fh, "\n");
-            }
-            fclose(fh);
-#endif
+        // Text output file
+        if(dst.find("txt") != string::npos) {
             std::cout << "Writing output text file" << std::endl;
-            fh = fopen(dst.empty() ? "output.txt" : dst.c_str(), "w");
+            FILE* fp = fopen(dst.empty() ? "output.txt" : dst.c_str(), "w");
+            fprintf(fp, "%d %d\n", g_numTargetPoints, numFields);
             for(int i = 0; i < g_numTargetPoints; i++) {
-               fprintf(fh, "%.2f %.2f ",
+               fprintf(fp, "%.2f %.2f ",
                  (*target_points_p)(0,i),
                  (*target_points_p)(1,i));
                for(int j = 0; j < numFields; j++)
-                   fprintf(fh, "%.2f ", (*target_fields_p)(j,i));
-               fprintf(fh, "\n");
+                   fprintf(fp, "%.2f ", (*target_fields_p)(j,i));
+               fprintf(fp, "\n");
             }
-            fclose(fh);
+            fclose(fp);
 
+        // Binary output file
+        } else if(dst.find("grib") == string::npos) {
+            std::cout << "Writing output binary file" << std::endl;
+            FILE* fp = fopen(dst.empty() ? "output.bin" : dst.c_str(), "wb");
+            size_t elements_written = 0;
+            elements_written += fwrite(&g_numTargetPoints, sizeof(g_numTargetPoints), 1, fp);
+            elements_written += fwrite(&numFields, sizeof(numFields), 1, fp);
+            for(int i = 0; i < g_numPoints; i++) {
+               double v;
+               v = (*points_p)(0,i);
+               elements_written += fwrite(&v, sizeof(v), 1, fp);
+               v = (*points_p)(1,i);
+               elements_written += fwrite(&v, sizeof(v), 1, fp);
+               for(int j = 0; j < numFields; j++) {
+                   v = (*fields_p)(j,i);
+                   elements_written += fwrite(&v, sizeof(v), 1, fp);
+               }
+            }
+            fclose(fp);
+        // Grib2 ouptput file
         } else {
             std::cout << "Writing output grib file." << std::endl;
 
-            FILE* fp_s = fopen(tmpl.c_str(), "r");
-            if(!fp_s) return;
+            FILE* fp = fopen(tmpl.c_str(), "r");
+            if(!fp) return;
             size_t size = g_numTargetPoints;
             VectorXd values(size);
 
             int ret, idx = 0;
-            while (codes_handle* h = codes_handle_new_from_file(0, fp_s, PRODUCT_GRIB, &ret)) {
+            while (codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret)) {
 #if 0
               codes_keys_iterator* iter = codes_keys_iterator_new(h, 0, 0);
               while (codes_keys_iterator_next(iter)) {
