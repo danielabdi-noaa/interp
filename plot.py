@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 import argparse
 import struct
@@ -12,8 +13,10 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
+is3d = False
+
 # Read input data from text file
-x, y, z = [], [], []
+x, y, z, v = [], [], [], []
 
 if "txt" in args.input:
     with open(args.input, "r") as file:
@@ -26,31 +29,55 @@ if "txt" in args.input:
                 vals = list(map(float, line.split()))
                 x.append(vals[0])
                 y.append(vals[1])
-                z.append(vals[2:])
+                if is3d:
+                    z.append(vals[2])
+                    v.append(vals[3:])
+                else:
+                    v.append(vals[2:])
 else:
     with open(args.input, 'rb') as file:
         numPoints, numFields = struct.unpack('ii', file.read(8))
         for i in range(numPoints):
             buffer = file.read((2+numFields)*8)
-            xi, yi, *zi = struct.unpack('dd' + 'd'*numFields, buffer)
+            if is3d:
+                xi, yi, zi, *vi = struct.unpack('ddd' + 'd'*numFields, buffer)
+            else:
+                xi, yi, *vi = struct.unpack('dd' + 'd'*numFields, buffer)
             x.append(xi)
             y.append(yi)
-            z.append(zi)
+            if is3d:
+                z.append(zi)
+                v.append(vi)
+            else:
+                v.append(vi)
 
 x = np.array(x)
 y = np.array(y)
-z = np.array(z)
+if is3d:
+    z = np.array(z)
+    v = np.array(v)
+else:
+    v = np.array(v)
 
 # Plot all fields
-for i in range(np.size(z,1)):
+for i in range(np.size(v,1)):
 
-    filt = (z[:,i] != 9999.00)
+    filt = (v[:,i] != 9999.00)
     xi = x[filt]
     yi = y[filt]
-    zi = z[filt,i]
+    if is3d:
+        zi = z[filt]
+    vi = v[filt,i]
 
-    fig, axs = plt.subplots(1, 1, figsize=[13.63, 10.0])
-    pc = axs.tricontourf(xi, yi, zi, cmap='viridis')
-    #pc = axs.scatter(xi, yi, c=zi, s=0.03, cmap="viridis")
+    if is3d:
+        fig = plt.figure()
+        axs = fig.add_subplot(111, projection='3d')
+        #pc = axs.plot_trisurf(xi, yi, zi, cmap='viridis')
+        pc = axs.scatter(xi, yi, zi, c=vi, cmap='viridis', s= 0.03)
+    else:
+        fig, axs = plt.subplots(1, 1, figsize=[13.63, 10.0])
+        pc = axs.tricontourf(xi, yi, vi, cmap='viridis')
+        #pc = axs.scatter(xi, yi, c=vi, s=0.03, cmap="viridis")
     fig.colorbar(pc, ax=axs, extend='both')
     plt.savefig(f"field_{i}_{args.output}")
+    #plt.show()
