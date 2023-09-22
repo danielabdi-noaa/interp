@@ -322,6 +322,11 @@ namespace GlobalData {
     //
     //read/generate target interpolation points
     //
+    void read_input_file(
+          std::string src,
+          MatrixXd*& points,
+          MatrixXd*& fields);
+
     void read_target_points(MatrixXd*& target_points, std::string tmpl) {
         Timer t;
 
@@ -353,29 +358,9 @@ namespace GlobalData {
             } else
 #endif
             {
-                std::cout << "Reading interpolation grid from text file" << std::endl;
-
-                FILE* fh = fopen(tmpl.c_str(), "r");
-                char buffer[256];
-                int idx = 0;
-
-                if(fgets(buffer, 256, fh)) {
-                    int dummy;
-                    sscanf(buffer, "%d %d", &g_numTargetPoints, &dummy);
-                    target_points = new MatrixXd(numDims, g_numTargetPoints);
-                }
-
-                while(fgets(buffer, 256, fh)) {
-                    int elements_read = 0;
-                    for(int i = 0; i < numDims; i++) {
-                        double v;
-                        int count;
-                        sscanf(buffer + elements_read, "%lf%n", &v, &count);
-                        elements_read += count;
-                        (*target_points)(i, idx) = v;
-                    }
-                    idx++;
-                }
+                std::cout << "Reading interpolation grid" << std::endl;
+                read_input_file(tmpl, target_points, target_points);
+                g_numTargetPoints = target_points->cols();
             }
         } else {
             g_numTargetPoints = n_lat_o*n_lon_o*n_hgt_o;
@@ -504,13 +489,16 @@ namespace GlobalData {
     }
 
     //
-    // Read grib file
+    // Read file
     //
-    void read_grib_file(
+    void read_input_file(
           std::string src,
-          MatrixXd*& points, MatrixXd*& fields
+          MatrixXd*& points,
+          MatrixXd*& fields
     ) {
         Timer t;
+        int numPoints;
+        int numFields;
 
         // Open input file
         std::string mode = "r";
@@ -527,11 +515,12 @@ namespace GlobalData {
         if(src.find("txt") != string::npos) {
             std::cout << "Reading input text file" << std::endl;
             size_t elements_read = 0;
-            elements_read += fscanf(fp, "%d %d", &g_numPoints, &numFields);
-            points = new MatrixXd(numDims, g_numPoints);
-            fields = new MatrixXd(numFields, g_numPoints);
+            elements_read += fscanf(fp, "%d %d", &numPoints, &numFields);
+            points = new MatrixXd(numDims, numPoints);
+            if(numFields)
+                fields = new MatrixXd(numFields, numPoints);
 
-            for(int i = 0; i < g_numPoints; i++) {
+            for(int i = 0; i < numPoints; i++) {
                 for(int j = 0; j < numDims; j++)
                    elements_read += fscanf(fp, "%lf", &((*points)(j,i)));
                 for(int j = 0; j < numFields; j++)
@@ -541,12 +530,13 @@ namespace GlobalData {
         } else if(src.find("grib") == string::npos) {
             std::cout << "Reading input binary file" << std::endl;
             size_t elements_read = 0;
-            elements_read += fread(&g_numPoints, sizeof(g_numPoints), 1, fp);
+            elements_read += fread(&numPoints, sizeof(numPoints), 1, fp);
             elements_read += fread(&numFields, sizeof(numFields), 1, fp);
-            points = new MatrixXd(numDims, g_numPoints);
-            fields = new MatrixXd(numFields, g_numPoints);
+            points = new MatrixXd(numDims, numPoints);
+            if(numFields)
+                fields = new MatrixXd(numFields, numPoints);
 
-            for(int i = 0; i < g_numPoints; i++) {
+            for(int i = 0; i < numPoints; i++) {
                 double v;
                 for(int j = 0; j < numDims; j++) {
                     elements_read += fread(&v, sizeof(v), 1, fp);
@@ -563,7 +553,6 @@ namespace GlobalData {
         else {
             std::cout << "Reading input grib file" << std::endl;
 
-            size_t numPoints;
             int ret;
             numFields = field_indices.size();
             if(numFields == 0) {
@@ -585,7 +574,8 @@ namespace GlobalData {
 
               // Allocate
               points = new MatrixXd(numDims, numPoints);
-              fields = new MatrixXd(numFields, numPoints);
+              if(numFields)
+                  fields = new MatrixXd(numFields, numPoints);
 
               // Get latitude and longitude
               VectorXd lons, lats, values;
@@ -601,7 +591,6 @@ namespace GlobalData {
 
               rewind(fp);
             }
-            g_numPoints = numPoints;
 
             if(useTestField) {
                 // Compute test field values at given locations
@@ -633,9 +622,9 @@ namespace GlobalData {
     }
 
     //
-    // write grib file
+    // write output file
     //
-    void write_grib_file(std::string tmpl, std::string dst) {
+    void write_output_file(std::string tmpl, std::string dst) {
         Timer t;
 
         // Text output file
@@ -798,8 +787,11 @@ namespace GlobalData {
         // read source points and fields
         if(src.empty())
             generate_random_data(points, fields);
-        else
-            read_grib_file(src, points, fields);
+        else {
+            read_input_file(src, points, fields);
+            g_numPoints = points->cols();
+            numFields = fields->rows();
+        }
 
 #if 0
         // Write input file in text format
@@ -1572,7 +1564,7 @@ int main(int argc, char** argv) {
 
     // Write result to a grib file
     if(mpi_rank == 0)
-        GlobalData::write_grib_file(tmpl, dst);
+        GlobalData::write_output_file(tmpl, dst);
 
     // Compute L2 norm of error
     if(src.empty() || useTestField)
