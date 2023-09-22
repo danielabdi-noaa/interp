@@ -360,14 +360,18 @@ namespace GlobalData {
                 int idx = 0;
 
                 if(fgets(buffer, 256, fh)) {
-                    sscanf(buffer, "%d", &g_numTargetPoints);
+                    int dummy;
+                    sscanf(buffer, "%d %d", &g_numTargetPoints, &dummy);
                     target_points = new MatrixXd(numDims, g_numTargetPoints);
                 }
 
                 while(fgets(buffer, 256, fh)) {
+                    int elements_read = 0;
                     for(int i = 0; i < numDims; i++) {
                         double v;
-                        sscanf(buffer, "%lf", &v);
+                        int count;
+                        sscanf(buffer + elements_read, "%lf%n", &v, &count);
+                        elements_read += count;
                         (*target_points)(i, idx) = v;
                     }
                     idx++;
@@ -641,9 +645,9 @@ namespace GlobalData {
             fprintf(fp, "%d %d\n", g_numTargetPoints, numFields);
             for(int i = 0; i < g_numTargetPoints; i++) {
                for(int j = 0; j < numDims; j++)
-                   fprintf(fp, "%.2f ", (*target_points_p)(j,i));
+                   fprintf(fp, "%f ", (*target_points_p)(j,i));
                for(int j = 0; j < numFields; j++)
-                   fprintf(fp, "%.2f ", (*target_fields_p)(j,i));
+                   fprintf(fp, "%f ", (*target_fields_p)(j,i));
                fprintf(fp, "\n");
             }
             fclose(fp);
