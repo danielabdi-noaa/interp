@@ -420,14 +420,19 @@ namespace GlobalData {
     //
     // Compute test field values at given locations
     //
-    void compute_test_fields(const int numPoints, const MatrixXd& points, MatrixXd& fields) {
+    void compute_test_fields(const MatrixXd& points, MatrixXd& fields) {
         VectorXd p(numDims);
+        VectorXd maxC = points.rowwise().maxCoeff();
+        VectorXd minC = points.rowwise().minCoeff();
+
+        int numPoints = fields.cols(), numFields = fields.rows();
+
         for (int i = 0; i < numPoints; i++) {
             for(int j = 0; j < numFields; j++) {
-                p(0) = 2 * (points(0,i) - lon_min) / (lon_max - lon_min) - 1;
-                p(1) = 2 * (points(1,i) - lat_min) / (lat_max - lat_min) - 1;
+                p(0) = 2 * (points(0,i) - minC(0)) / (maxC(0) - minC(0)) - 1;
+                p(1) = 2 * (points(1,i) - minC(1)) / (maxC(1) - minC(1)) - 1;
                 if(numDims >= 3)
-                    p(2) = 2 * (points(2,i) - hgt_min) / (hgt_max - hgt_min) - 1;
+                    p(2) = 2 * (points(2,i) - minC(2)) / (maxC(2) - minC(2)) - 1;
 
                 const double x = p(0), y = p(1);
                 constexpr double pi = 3.14159265358979323846;
@@ -443,7 +448,7 @@ namespace GlobalData {
     //
     void compute_L2norm_error() {
         MatrixXd fields_error(numFields,g_numTargetPoints);
-        compute_test_fields(g_numTargetPoints, *target_points_p, fields_error);
+        compute_test_fields(*target_points_p, fields_error);
         fields_error -= *target_fields_p;
         std::cout << "L2 norm of error of interpolation: " << fields_error.norm() << std::endl;
     }
@@ -496,8 +501,8 @@ namespace GlobalData {
                                 2.0 * (hgt_max - hgt_min) + hgt_min;
         }
 
-        // Compute test field values at given locations
-        compute_test_fields(numPoints,*points,*fields);
+        // Compute test field values at given source locations
+        compute_test_fields(*points,*fields);
     }
 
     //
@@ -604,26 +609,21 @@ namespace GlobalData {
               rewind(fp);
             }
 
-            if(useTestField) {
-                // Compute test field values at given locations
-                compute_test_fields(numPoints,*points,*fields);
-            } else {
-                // loop through all fields and read data
-                VectorXd values(numPoints);
-                int idx = 0, f = 0;
-                while (codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret)) {
+            // loop through all fields and read data
+            VectorXd values(numPoints);
+            int idx = 0, f = 0;
+            while (codes_handle* h = codes_handle_new_from_file(0, fp, PRODUCT_GRIB, &ret)) {
 
-                  if(f < numFields && idx == field_indices[f]) {
-                    CODES_CHECK(codes_get_double_array(h, "values",
-                                values.data(), &numPoints), 0);
+              if(f < numFields && idx == field_indices[f]) {
+                CODES_CHECK(codes_get_double_array(h, "values",
+                            values.data(), &numPoints), 0);
 
-                    fields->row(f) = values;
-                    f++;
-                  }
+                fields->row(f) = values;
+                f++;
+              }
 
-                  codes_handle_delete(h);
-                  idx++;
-                }
+              codes_handle_delete(h);
+              idx++;
             }
         }
 #endif
@@ -803,6 +803,12 @@ namespace GlobalData {
             read_input_file(src, points, fields);
             g_numPoints = points->cols();
             numFields = fields->rows();
+            // Overwrite with a test field if requested for it
+            // Useful for tuning parameters with a known field
+            if(numFields && useTestField) {
+                std::cout << "Overwriting with a test field" << std::endl;
+                compute_test_fields(*points,*fields);
+            }
         }
 
 #if 0
