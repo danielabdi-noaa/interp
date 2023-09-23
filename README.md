@@ -3,12 +3,12 @@ A simple RBF interpolation utility considering only k nearest neighbors.
 It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header only) for nearest neighbor search.
 `nanoflann` comes included with the distribution so it is technically not a dependency.
 
-    Interpolate fields in a grib2 or other format file onto another grid or scattered locations.
+    Interpolate fields from one grid onto another grid or scattered locations using grib2/text/binary formats.
     
     Example:
         OMP_NUM_THREADS=8 ./interp -i rrfs_a.t06z.bgdawpf007.tm00.grib2 -t rrfs.t06z.prslev.f007.ak.grib2 -f 0,3
     
-    This does interpolation of fields 0 and 3 using 8 threads from the North-american domain to the Alaska grid.
+    This example performs interpolation of fields 0 and 3 using 8 threads from the North American domain to the Alaska grid.
     
     usage: ./interp [-h] [--input INPUT] [--output OUTPUT] [--template TEMPLATE]
                          [--clusters-per-rank CLUSTERS_PER_RANK] [--fields FIELDS]
@@ -17,24 +17,24 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
                          [--cutoff-radius CUTOFF_RADIUS] [--cutoff-radius-interp CUTOFF_RADIUS_INTERP]
     
     arguments:
-      -h, --help               show this help message and exit
-      -i, --input              grib or other text/binary file containing coordinates and fields to interpolate
-      -o, --output             output grib or other text/binary file containing result of interpolation
-      -t, --template           template grib file that the output grib file is to be based upon
-      -c, --clusters-per-rank  number of point clusters (point clouds) per MPI rank
-      -f, --fields             comma separated list indices of fields in grib file that are to be interpolated
-                               hyphen(-) can be used to indicate range of fields e.g. 0-3 means fields 0,1,2
-                               question(?) can be used to indicate all fields in a grib file
-      -n, --neighbors          number of neighbors to be used during solution for weights using source points
-      -ni, --neighbors-interp  number of neighbors to be used during interpolation at target points
-      -r, --rbf-shape          shape factor for RBF kernel
-      -ucr, --use-cutoff-radius      use cutoff radius instead of fixed number of nearest neighbors
-      -cr, --cutoff-radius           cutoff radius used during solution
-      -cri, --cutoff-radius-interp   cutoff radius used during interpolation
-      -r, --rbf-smoothing      smoothing factor for rbf interpolation
-      -m, --monomials          number of monomials (supported 0 or 1)
-      -utf, --use-test-field   use test field function for initializing fields (applies even if grib2 file input is used)
-                               this could be useful for tuning parameters with L2 error of ground truth.
+      -h, --help               Show this help message and exit.
+      -i, --input              Input file in grib or other text/binary format containing coordinates and fields for interpolation.
+      -o, --output             Output file in grib or other text/binary format containing the result of the interpolation.
+      -t, --template           Template grib or other text/binary file on which the output file will be based.
+      -c, --clusters-per-rank  Number of point clusters (point clouds) per MPI rank
+      -f, --fields             Comma-separated list of field indices in the grib file to be interpolated.
+                               Use hyphens (-) to indicate a range of fields (e.g., 0-3 for fields 0, 1, 2).
+                               Use a question mark (?) to indicate all fields.
+      -n, --neighbors          Number of neighbors to be used during the solution for weights using source points.
+      -ni, --neighbors-interp  Number of neighbors to be used during the interpolation at target points.
+      -r, --rbf-shape          Shape factor for the RBF (Radial Basis Function) kernel.
+      -ucr, --use-cutoff-radius      Use a cutoff radius instead of fixed number of nearest neighbors.
+      -cr, --cutoff-radius           Cutoff radius used during the solution.
+      -cri, --cutoff-radius-interp   Cutoff radius used during interpolation.
+      -r, --rbf-smoothing      Smoothing factor for RBF interpolation.
+      -m, --monomials          Number of monomials (0 or 1 supported).
+      -utf, --use-test-field   Use a test field function for initializing fields. This applies even if input is read from a file.
+                               It can be useful for tuning parameters with the L2 error interpolation from ground truth.
 
 The most important parameters affecting performance and accuracy are `--rbf-shape`, `--neighbors` and `--neighbors-interp`.
 The RBF shape factor if automatically set if you don't provide one, however, you may want to tune that value later.
@@ -57,6 +57,10 @@ not as much as `--neighbors`. In general the more neighbors used, the smoother t
 If you don't need grib2 support via eccodes
 
     cmake -DCMAKE_BUILD_TYPE=release -DENABLE_GRIB=OFF ..
+
+To compile for 3D interpolation
+
+    cmake -DCMAKE_BUILD_TYPE=release -DENABLE_GRIB=OFF -DENABLE_3D=ON ..
 
 ## Run
 

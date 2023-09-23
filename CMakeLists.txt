@@ -6,6 +6,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 # some options
 option(ENABLE_GRIB "Enable grib2 processing with eccodes library" ON)
 option(USE_ITERATIVE "Use iterative solver" OFF)
+option(ENABLE_3D "Enable 3D interpolation" OFF)
 
 # find required packages
 find_package( OpenMP COMPONENTS CXX)

@@ -24,7 +24,11 @@ using namespace Eigen;
  **************************************************/
 
 // number of dimesnions 1D,2D,3D are supported
+#ifdef ENABLE_3D
+constexpr int numDims = 3;
+#else
 constexpr int numDims = 2;
+#endif
 
 // Rbf shape function can be computed approximately from
 // the average distance between points
@@ -408,7 +412,7 @@ namespace GlobalData {
                                         2.0 * (lon_max - lon_min) + lon_min;
                 target_points->row(1) = (target_points->row(1).array() + 1.0) /
                                         2.0 * (lat_max - lat_min) + lat_min;
-                if(numDims >= 3)
+                if constexpr (numDims >= 3)
                     target_points->row(2) = (target_points->row(2).array() + 1.0) /
                                         2.0 * (hgt_max - hgt_min) + hgt_min;
             }
@@ -431,13 +435,13 @@ namespace GlobalData {
             for(int j = 0; j < numFields; j++) {
                 p(0) = 2 * (points(0,i) - minC(0)) / (maxC(0) - minC(0)) - 1;
                 p(1) = 2 * (points(1,i) - minC(1)) / (maxC(1) - minC(1)) - 1;
-                if(numDims >= 3)
+                if constexpr (numDims >= 3)
                     p(2) = 2 * (points(2,i) - minC(2)) / (maxC(2) - minC(2)) - 1;
 
                 const double x = p(0), y = p(1);
                 constexpr double pi = 3.14159265358979323846;
                 double v = sqrt( exp(x*cos(3*pi*x)) * exp(y*cos(3*pi*y)) ) * (j + 1);
-                if(numDims >= 3)
+                if constexpr (numDims >= 3)
                     v *= p(2);
                 fields(j, i) = v;
             }
@@ -496,7 +500,7 @@ namespace GlobalData {
                              2.0 * (lon_max - lon_min) + lon_min;
             points->row(1) = (points->row(1).array() + 1.0) /
                              2.0 * (lat_max - lat_min) + lat_min;
-            if(numDims >= 3)
+            if constexpr (numDims >= 3)
                 points->row(2) = (points->row(2).array() + 1.0) /
                                 2.0 * (hgt_max - hgt_min) + hgt_min;
         }
@@ -1413,34 +1417,34 @@ void merge_cluster(ClusterData& parent, int numClusters,
  *****************/
 
 void usage() {
-    std::cout << "Interpolate fields in a grib2 or other format file onto another grid or scattered locations." << std::endl << std::endl
+    std::cout << "Interpolate fields from one grid onto another grid or scattered locations using grib2/text/binary formats." << std::endl << std::endl
               << "Example:" << std::endl
               << "    OMP_NUM_THREADS=8 ./interp -i rrfs_a.t06z.bgdawpf007.tm00.grib2 -t rrfs.t06z.prslev.f007.ak.grib2 -f 0,3" << std::endl << std::endl
-              << "This does interpolation of fields 0 and 3 using 8 threads from the North-american domain to the Alaska grid." << std::endl << std::endl
+              << "This example performs interpolation of fields 0 and 3 using 8 threads from the North American domain to the Alaska grid." << std::endl << std::endl
               << "usage: ./interp [-h] [--input INPUT] [--output OUTPUT] [--template TEMPLATE]" << std::endl
               << "                     [--clusters-per-rank CLUSTERS_PER_RANK] [--fields FIELDS]" << std::endl
               << "                     [--neighbors NEIGHBORS] [--neighbors-interp NEIGHBORS_INTERP]" << std::endl
               << "                     [--rbf-shape RBF_SHAPE] [--use-cutoff-radius USE_CUTOFF_RADIUS]" << std::endl
               << "                     [--cutoff-radius CUTOFF_RADIUS] [--cutoff-radius-interp CUTOFF_RADIUS_INTERP]" << std::endl << std::endl
               << "arguments:" << std::endl
-              << "  -h, --help               show this help message and exit" << std::endl
-              << "  -i, --input              grib or other text/binary file containing coordinates and fields to interpolate" << std::endl
-              << "  -o, --output             output grib or other text/binary file containing result of interpolation" << std::endl
-              << "  -t, --template           template grib file that the output grib file is to be based upon" << std::endl
-              << "  -c, --clusters-per-rank  number of point clusters (point clouds) per MPI rank" << std::endl
-              << "  -f, --fields             comma separated list indices of fields in grib file that are to be interpolated" << std::endl
-              << "                           hyphen(-) can be used to indicate range of fields e.g. 0-3 means fields 0,1,2" << std::endl
-              << "                           question(?) can be used to indicate all fields in a grib file" << std::endl
-              << "  -n, --neighbors          number of neighbors to be used during solution for weights using source points" << std::endl
-              << "  -ni, --neighbors-interp  number of neighbors to be used during interpolation at target points" << std::endl
-              << "  -r, --rbf-shape          shape factor for RBF kernel" << std::endl
-              << "  -ucr, --use-cutoff-radius      use cutoff radius instead of fixed number of nearest neighbors" << std::endl
-              << "  -cr, --cutoff-radius           cutoff radius used during solution" << std::endl
-              << "  -cri, --cutoff-radius-interp   cutoff radius used during interpolation" << std::endl
-              << "  -r, --rbf-smoothing      smoothing factor for rbf interpolation" << std::endl
-              << "  -m, --monomials          number of monomials (supported 0 or 1)" << std::endl
-              << "  -utf, --use-test-field   use test field function for initializing fields (applies even if grib2 file input is used)" << std::endl
-              << "                           this could be useful for tuning parameters with L2 error of ground truth." << std::endl;
+              << "  -h, --help               Show this help message and exit." << std::endl
+              << "  -i, --input              Input file in grib or other text/binary format containing coordinates and fields for interpolation." << std::endl
+              << "  -o, --output             Output file in grib or other text/binary format containing the result of the interpolation." << std::endl
+              << "  -t, --template           Template grib or other text/binary file on which the output file will be based." << std::endl
+              << "  -c, --clusters-per-rank  Number of point clusters (point clouds) per MPI rank" << std::endl
+              << "  -f, --fields             Comma-separated list of field indices in the grib file to be interpolated." << std::endl
+              << "                           Use hyphens (-) to indicate a range of fields (e.g., 0-3 for fields 0, 1, 2)." << std::endl
+              << "                           Use a question mark (?) to indicate all fields." << std::endl
+              << "  -n, --neighbors          Number of neighbors to be used during the solution for weights using source points." << std::endl
+              << "  -ni, --neighbors-interp  Number of neighbors to be used during the interpolation at target points." << std::endl
+              << "  -r, --rbf-shape          Shape factor for the RBF (Radial Basis Function) kernel." << std::endl
+              << "  -ucr, --use-cutoff-radius      Use a cutoff radius instead of fixed number of nearest neighbors." << std::endl
+              << "  -cr, --cutoff-radius           Cutoff radius used during the solution." << std::endl
+              << "  -cri, --cutoff-radius-interp   Cutoff radius used during interpolation." << std::endl
+              << "  -r, --rbf-smoothing      Smoothing factor for RBF interpolation." << std::endl
+              << "  -m, --monomials          Number of monomials (0 or 1 supported)." << std::endl
+              << "  -utf, --use-test-field   Use a test field function for initializing fields. This applies even if input is read from a file." << std::endl
+              << "                           It can be useful for tuning parameters with the L2 error interpolation from ground truth." << std::endl;
 }
 
 int main(int argc, char** argv) {

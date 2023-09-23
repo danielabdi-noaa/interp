@@ -9,6 +9,9 @@ add_executable(interp ${SOURCES})
 if(USE_ITERATIVE)
     target_compile_definitions(interp PRIVATE USE_ITERATIVE)
 endif()
+if(ENABLE_3D)
+    target_compile_definitions(interp PRIVATE ENABLE_3D)
+endif()
 
 # link packages
 if(OpenMP_FOUND)
