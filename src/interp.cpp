@@ -1122,9 +1122,17 @@ struct ClusterData {
     // Build KD tree needed for fast nearest neighbor search
     //
     void build_kdtree() {
+        cout_mutex.lock();
+        std::cout << "Started building KD tree ..." << std::endl;
+        cout_mutex.unlock();
+
+        Timer t;
+
         cloud = new PointCloud(points, numPoints);
         ptree = new KDTree(numDims, *cloud, nanoflann::KDTreeSingleIndexAdaptorParams());
         ptree->buildIndex();
+
+        t.elapsed();
     }
     //
     // Build sparse RBF interpolation matrix using either k nearest neigbors
@@ -1134,6 +1142,12 @@ struct ClusterData {
 
         // Compute rbf shape factor
         if(rbfShape == 0) {
+            cout_mutex.lock();
+            std::cout << "Started computing shape factor ..." << std::endl;
+            cout_mutex.unlock();
+
+            Timer t;
+
             size_t nindex[2];
             double ndistance[2], total = 0; 
             VectorXd query(numDims);
@@ -1147,6 +1161,8 @@ struct ClusterData {
             cout_mutex.lock();
             std::cout << "Automatically computed shape factor: " << rbfShape << std::endl;
             cout_mutex.unlock();
+
+            t.elapsed();
         }
 
         // non-parametric rbf
