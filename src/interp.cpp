@@ -192,11 +192,23 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
         // Update the cluster centers
         sumClusterCenters.setZero(numDims,numClusters);
         clusterSizes.setZero(numClusters);
-#pragma omp paralle for reduction(+:sumClusterCenters,clusterSizes)
-        for (int i = 0; i < numPoints; i++) {
-            int cluster = clusterAssignments(i);
-            sumClusterCenters.col(cluster) += points.col(i);
-            clusterSizes(cluster)++;
+#pragma omp parallel
+        {
+            MatrixXd sumClusterCenters_(numDims, numClusters);
+            VectorXi clusterSizes_(numClusters);
+            sumClusterCenters_.setZero(numDims,numClusters);
+            clusterSizes_.setZero(numClusters);
+#pragma omp for nowait
+            for (int i = 0; i < numPoints; i++) {
+                int cluster = clusterAssignments(i);
+                sumClusterCenters_.col(cluster) += points.col(i);
+                clusterSizes_(cluster)++;
+            }
+#pragma omp critical
+            {
+                sumClusterCenters += sumClusterCenters_;
+                clusterSizes += clusterSizes_;
+            }
         }
         for (int i = 0; i < numClusters; i++) {
             if (clusterSizes(i) > 0)
