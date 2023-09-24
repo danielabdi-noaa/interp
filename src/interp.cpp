@@ -57,6 +57,10 @@ static int monomials;
 // Use test function for field initialization
 static bool useTestField;
 
+// Average duplicate fields
+static bool averageDuplicates;
+constexpr double dupsTolerance = 1e-6;
+
 // mutex for cout 
 static std::mutex cout_mutex;
 
@@ -805,6 +809,7 @@ namespace GlobalData {
             generate_random_data(points, fields);
         else {
             read_input_file(src, points, fields);
+
             g_numPoints = points->cols();
             numFields = fields->rows();
             // Overwrite with a test field if requested for it
@@ -995,6 +1000,87 @@ struct ClusterData {
         MPI_Gatherv(target_fields.data(), numTargetPoints * numFields, MPI_DOUBLE,
                 target_fields_p ? target_fields_p->data() : nullptr, counts.data(), offsets.data(),
                 MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    }
+    //
+    // Average duplicates
+    //
+    struct PointHash {
+        size_t operator()(const VectorXd& p) const {
+            size_t h1 = std::hash<double>{}(p(0) / dupsTolerance);
+            size_t h2 = std::hash<double>{}(p(1) / dupsTolerance);
+            size_t h3 = (numDims == 3) ? std::hash<double>{}(p(2) / dupsTolerance) : 0;
+            return h1 ^ (h2 << 1) ^ (h3 << 2);
+        }
+    };
+    struct PointEqual {
+        bool operator()(const VectorXd& p1, const VectorXd& p2) const {
+            return std::abs(p1(0) - p2(0)) < dupsTolerance &&
+                   std::abs(p1(1) - p2(1)) < dupsTolerance &&
+                   (numDims == 2 || std::abs(p1(2) - p2(2)) < dupsTolerance);
+        }
+    };
+    void average_duplicates() {
+        Timer t;
+
+        cout_mutex.lock();
+        std::cout << "Averaging duplicates ..." << std::endl;
+        cout_mutex.unlock();
+
+        int numPoints = fields.cols(), numFields = fields.rows();
+        std::unordered_map<VectorXd, int, PointHash, PointEqual> uniquePoints;
+
+        // Find and process duplicates
+        VectorXi duplicates(numPoints), duplicates_count(numPoints);
+        duplicates.setZero(numPoints);
+        duplicates_count.setZero(numPoints);
+
+        int dups = 0;
+        for (int i = 0; i < numPoints; i++) {
+            if(duplicates[i]) continue;
+
+            auto it = uniquePoints.find(points.col(i));
+            if (it != uniquePoints.end()) {
+                duplicates[i] = it->second + 1;
+                dups++;
+            } else {
+                uniquePoints[points.col(i)] = i;
+            }
+        }
+
+        // Average duplicates
+        for (int i = 0; i < numPoints; i++) {
+            if(!duplicates[i]) continue;
+            int idx = duplicates[i] - 1;
+            fields.col(idx) += fields.col(i);
+            duplicates_count(idx)++;
+        }
+        for (int i = 0; i < numPoints; i++) {
+            if(!duplicates_count[i]) continue;
+            fields.col(i) /= (duplicates_count[i] + 1);
+        }
+
+        // Resize arrays
+        MatrixXd points_(numDims, numPoints - dups);
+        MatrixXd fields_(numFields, numPoints - dups);
+        int idx = 0;
+        for (int i = 0; i < numPoints; i++) {
+            if(duplicates[i]) continue;
+            points_.col(idx) = points.col(i);
+            fields_.col(idx) = fields.col(i);
+            idx++;
+        }
+        points.resize(numDims, numPoints - dups);
+        fields.resize(numDims, numPoints - dups);
+        points = points_;
+        fields = fields_;
+        ClusterData::numPoints = numPoints - dups;
+
+        // Finish
+        cout_mutex.lock();
+        std::cout << "Found and averaged " << dups << " duplicates." << std::endl;
+        cout_mutex.unlock();
+
+        t.elapsed();
     }
     //
     // Build sparse interpolation matrix and LU decompose it
@@ -1302,6 +1388,8 @@ struct ClusterData {
     // Conveneince function to build and solve rbf interpolation
     //
     void build_and_solve() {
+        if(averageDuplicates)
+            average_duplicates(); 
         build_kdtree();
         build_rbf();
         solve_rbf();
@@ -1443,6 +1531,7 @@ void usage() {
               << "  -cri, --cutoff-radius-interp   Cutoff radius used during interpolation." << std::endl
               << "  -r, --rbf-smoothing      Smoothing factor for RBF interpolation." << std::endl
               << "  -m, --monomials          Number of monomials (0 or 1 supported)." << std::endl
+              << "  -a, --average-duplicates Average duplicate entries in input files." << std::endl
               << "  -utf, --use-test-field   Use a test field function for initializing fields. This applies even if input is read from a file." << std::endl
               << "                           It can be useful for tuning parameters with the L2 error interpolation from ground truth." << std::endl;
 }
@@ -1472,6 +1561,7 @@ int main(int argc, char** argv) {
     rbfSmoothing = 0.0;
     monomials = 0;
     useTestField = false;
+    averageDuplicates = false;
     field_indices.push_back(0);
 
     if(mpi_rank == 0) {
@@ -1522,6 +1612,8 @@ int main(int argc, char** argv) {
                 monomials = stoi(*++it);
             } else if(*it == "-utf" || *it == "--use-test-field") {
                 useTestField = true;
+            } else if(*it == "-a" || *it == "--average-duplicates") {
+                averageDuplicates = true;
             }
         }
 

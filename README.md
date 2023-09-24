@@ -33,6 +33,7 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
       -cri, --cutoff-radius-interp   Cutoff radius used during interpolation.
       -r, --rbf-smoothing      Smoothing factor for RBF interpolation.
       -m, --monomials          Number of monomials (0 or 1 supported).
+      -a, --average-duplicates Average duplicate entries in input files.
       -utf, --use-test-field   Use a test field function for initializing fields. This applies even if input is read from a file.
                                It can be useful for tuning parameters with the L2 error interpolation from ground truth.
 
