@@ -2,6 +2,7 @@
 #include <cmath>
 #include <random>
 #include <vector>
+#include <unordered_map>
 #include <mutex>
 #include <string>
 #include <iostream>
@@ -218,6 +219,8 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
                 clusterSizes += clusterSizes_;
             }
         }
+
+#pragma omp parallel for
         for (int i = 0; i < numClusters; i++) {
             if (clusterSizes(i) > 0)
                 clusterCenters.col(i) = sumClusterCenters.col(i) / clusterSizes(i);
