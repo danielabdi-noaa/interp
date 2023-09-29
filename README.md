@@ -34,6 +34,9 @@ It uses the [nanoflann](https://github.com/jlblancoc/nanoflann) library (header 
       -r, --rbf-smoothing      Smoothing factor for RBF interpolation.
       -m, --monomials          Number of monomials (0 or 1 supported).
       -a, --average-duplicates Average duplicate entries in input files.
+      -h, --header             Provide three integers for the total number of source points, target points and fields in the input files.
+                                  e.g. --header 12000 24000 1
+                               In this case, the ouput file will have no headers as well.
       -utf, --use-test-field   Use a test field function for initializing fields. This applies even if input is read from a file.
                                It can be useful for tuning parameters with the L2 error interpolation from ground truth.
 

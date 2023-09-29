@@ -308,6 +308,7 @@ namespace GlobalData {
     int g_numPoints;
     int g_numTargetPoints;
     int numFields;
+    bool useHeader;
     int numClustersPerRank;
     std::vector<int> field_indices;
 
@@ -348,7 +349,8 @@ namespace GlobalData {
     void read_input_file(
           std::string src,
           MatrixXd*& points,
-          MatrixXd*& fields);
+          MatrixXd*& fields,
+          bool is_target);
 
     void read_target_points(MatrixXd*& target_points, std::string tmpl) {
         Timer t;
@@ -382,7 +384,7 @@ namespace GlobalData {
 #endif
             {
                 std::cout << "Reading interpolation grid" << std::endl;
-                read_input_file(tmpl, target_points, target_points);
+                read_input_file(tmpl, target_points, target_points, true);
                 g_numTargetPoints = target_points->cols();
             }
         } else {
@@ -522,7 +524,8 @@ namespace GlobalData {
     void read_input_file(
           std::string src,
           MatrixXd*& points,
-          MatrixXd*& fields
+          MatrixXd*& fields,
+          bool is_target = false
     ) {
         Timer t;
         int numPoints;
@@ -543,9 +546,17 @@ namespace GlobalData {
         if(src.find("txt") != string::npos) {
             std::cout << "Reading input text file" << std::endl;
             size_t elements_read = 0;
-            elements_read += fscanf(fp, "%d %d", &numPoints, &numFields);
+            if(is_target) {
+                numPoints = g_numTargetPoints;
+                numFields = 0;
+            } else {
+                numPoints = g_numPoints;
+                numFields = GlobalData::numFields;
+            }
+            if(!numPoints)
+                elements_read += fscanf(fp, "%d %d", &numPoints, &numFields);
             points = new MatrixXd(numDims, numPoints);
-            if(numFields)
+            if(!is_target)
                 fields = new MatrixXd(numFields, numPoints);
 
             for(int i = 0; i < numPoints; i++) {
@@ -558,10 +569,19 @@ namespace GlobalData {
         } else if(src.find("grib") == string::npos) {
             std::cout << "Reading input binary file" << std::endl;
             size_t elements_read = 0;
-            elements_read += fread(&numPoints, sizeof(numPoints), 1, fp);
-            elements_read += fread(&numFields, sizeof(numFields), 1, fp);
+            if(is_target) {
+                numPoints = g_numTargetPoints;
+                numFields = 0;
+            } else {
+                numPoints = g_numPoints;
+                numFields = GlobalData::numFields;
+            }
+            if(!numPoints) {
+                elements_read += fread(&numPoints, sizeof(numPoints), 1, fp);
+                elements_read += fread(&numFields, sizeof(numFields), 1, fp);
+            }
             points = new MatrixXd(numDims, numPoints);
-            if(numFields)
+            if(!is_target)
                 fields = new MatrixXd(numFields, numPoints);
 
             for(int i = 0; i < numPoints; i++) {
@@ -602,7 +622,7 @@ namespace GlobalData {
 
               // Allocate
               points = new MatrixXd(numDims, numPoints);
-              if(numFields)
+              if(!is_target)
                   fields = new MatrixXd(numFields, numPoints);
 
               // Get latitude and longitude
@@ -654,7 +674,8 @@ namespace GlobalData {
         if(dst.find("txt") != string::npos) {
             std::cout << "Writing output text file" << std::endl;
             FILE* fp = fopen(dst.empty() ? "output.txt" : dst.c_str(), "w");
-            fprintf(fp, "%d %d\n", g_numTargetPoints, numFields);
+            if(GlobalData::useHeader)
+                fprintf(fp, "%d %d\n", g_numTargetPoints, numFields);
             for(int i = 0; i < g_numTargetPoints; i++) {
                for(int j = 0; j < numDims; j++)
                    fprintf(fp, "%f ", (*target_points_p)(j,i));
@@ -669,8 +690,10 @@ namespace GlobalData {
             std::cout << "Writing output binary file" << std::endl;
             FILE* fp = fopen(dst.empty() ? "output.bin" : dst.c_str(), "wb");
             size_t elements_written = 0;
-            elements_written += fwrite(&g_numTargetPoints, sizeof(g_numTargetPoints), 1, fp);
-            elements_written += fwrite(&numFields, sizeof(numFields), 1, fp);
+            if(GlobalData::useHeader) {
+                elements_written += fwrite(&g_numTargetPoints, sizeof(g_numTargetPoints), 1, fp);
+                elements_written += fwrite(&numFields, sizeof(numFields), 1, fp);
+            }
             for(int i = 0; i < g_numTargetPoints; i++) {
                double v;
                for(int j = 0; j < numDims; j++) {
@@ -860,6 +883,7 @@ namespace GlobalData {
         }
         exit(0);
 #endif
+
         // read target points
         read_target_points(target_points, tmpl);
 
@@ -1539,6 +1563,9 @@ void usage() {
               << "  -r, --rbf-smoothing      Smoothing factor for RBF interpolation." << std::endl
               << "  -m, --monomials          Number of monomials (0 or 1 supported)." << std::endl
               << "  -a, --average-duplicates Average duplicate entries in input files." << std::endl
+              << "  -h, --header             Provide three integers for the total number of source points, target points and fields in the input files." << std::endl
+              << "                              e.g. --header 12000 24000 1" << std::endl
+              << "                           In this case, the ouput file will have no headers as well." << std::endl
               << "  -utf, --use-test-field   Use a test field function for initializing fields. This applies even if input is read from a file." << std::endl
               << "                           It can be useful for tuning parameters with the L2 error interpolation from ground truth." << std::endl;
 }
@@ -1570,6 +1597,11 @@ int main(int argc, char** argv) {
     useTestField = false;
     averageDuplicates = false;
     field_indices.push_back(0);
+
+    GlobalData::numFields = 0;
+    GlobalData::g_numPoints = 0;
+    GlobalData::g_numTargetPoints = 0;
+    GlobalData::useHeader = true;
 
     if(mpi_rank == 0) {
         std::vector<std::string> args(argv + 1, argv + argc);
@@ -1621,6 +1653,11 @@ int main(int argc, char** argv) {
                 useTestField = true;
             } else if(*it == "-a" || *it == "--average-duplicates") {
                 averageDuplicates = true;
+            } else if(*it == "-hd" || *it == "--header") {
+                GlobalData::g_numPoints = stoi(*++it);
+                GlobalData::g_numTargetPoints = stoi(*++it);
+                GlobalData::numFields = stoi(*++it);
+                GlobalData::useHeader = false;
             }
         }
 
