@@ -554,7 +554,7 @@ namespace GlobalData {
                 for(int j = 0; j < numFields; j++)
                    elements_read += fscanf(fp, "%lf", &((*fields)(j,i)));
             }
-        // Bindary input file
+        // Binary input file
         } else if(src.find("grib") == string::npos) {
             std::cout << "Reading input binary file" << std::endl;
             size_t elements_read = 0;
@@ -831,9 +831,9 @@ namespace GlobalData {
             fprintf(fp, "%d %d\n", g_numPoints, numFields);
             for(int i = 0; i < g_numPoints; i++) {
                for(int j = 0; j < numDims; j++)
-                   fprintf(fp, "%.2f ", (*points)(j,i));
+                   fprintf(fp, "%f ", (*points)(j,i));
                for(int j = 0; j < numFields; j++)
-                   fprintf(fp, "%.2f ", (*fields)(j,i));
+                   fprintf(fp, "%f ", (*fields)(j,i));
                fprintf(fp, "\n");
             }
             fclose(fp);

@@ -116,6 +116,20 @@ For this example, fields UGDR:VGDR:TMP:RH:APCP are selected with their 0-based i
     Finished in 21.4104 secs.
 
 
+You can do some basic plotting with plot.py script
+
+    $ python3 plot.py -h
+
+    usage: plot.py [-h] --input INPUT --output OUTPUT [--3d]
+    
+    options:
+      -h, --help            show this help message and exit
+      --input INPUT, -i INPUT
+                            Path to input text file
+      --output OUTPUT, -o OUTPUT
+                            Path to output png file
+      --3d, -3              Indicates if the input file uses 3d coordinate
+
 To plot interpolation result over the conus domain
 
     $ python3 plot.py -i output.txt -o conus.png
