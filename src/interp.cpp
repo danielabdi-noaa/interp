@@ -36,7 +36,7 @@ constexpr int numDims = 2;
 //     rbfShape  = 0.8 / average_distance
 // If D is width of the domain
 //     rbfShape = 0.8 / (D / npoints^(1/numDims))
-static double rbfShape;
+static double rbfShapeGlobal;
 
 // Number of neighbors to consider for interpolation
 static int numNeighbors;
@@ -263,7 +263,7 @@ enum rbf_t {
 };
 
 template<rbf_t type = GAUSSIAN>
-double rbf(double r_) {
+double rbf(double r_, double rbfShape) {
     double r = (rbfShape * r_);
     if constexpr(type == GAUSSIAN) {
         return exp(-r*r);
@@ -894,6 +894,9 @@ struct ClusterData {
     SparseMatrix<double> A;
     RbfSolver solver;
     
+    // Rbf shape factor specific to cluster
+    double rbfShape;
+
     //
     // Scatter data to slave processors
     //
@@ -909,7 +912,7 @@ struct ClusterData {
                 0, MPI_COMM_WORLD);
         MPI_Bcast(&numNeighborsInterp, 1, MPI_INT,
                 0, MPI_COMM_WORLD);
-        MPI_Bcast(&rbfShape, 1, MPI_DOUBLE,
+        MPI_Bcast(&rbfShapeGlobal, 1, MPI_DOUBLE,
                 0, MPI_COMM_WORLD);
         MPI_Bcast(&useCutoffRadius, 1, MPI_C_BOOL,
                 0, MPI_COMM_WORLD);
@@ -1115,7 +1118,7 @@ struct ClusterData {
                 double sum = 0;
                 for (int k = 0; k < nMatches; k++) {
                     int j = matches[k].first;
-                    double r = rbf(sqrt(matches[k].second));
+                    double r = rbf(sqrt(matches[k].second),rbfShape);
                     if(i == j)
                         r += rbfSmoothing;
                     matches[k].second = r;
@@ -1148,7 +1151,7 @@ struct ClusterData {
                 double sum = 0;
                 for (int k = 0; k < numNeighbors; k++) {
                     int j = indices[k];
-                    double r = rbf(sqrt(distances[k]));
+                    double r = rbf(sqrt(distances[k]),rbfShape);
                     if(i == j)
                         r += rbfSmoothing;
                     distances[k] = r;
@@ -1240,7 +1243,7 @@ struct ClusterData {
     void build_rbf() {
 
         // Compute rbf shape factor
-        if(rbfShape == 0) {
+        if(rbfShapeGlobal == 0) {
             cout_mutex.lock();
             std::cout << "Started computing shape factor ..." << std::endl;
             cout_mutex.unlock();
@@ -1262,7 +1265,8 @@ struct ClusterData {
             cout_mutex.unlock();
 
             t.elapsed();
-        }
+        } else
+            rbfShape = rbfShapeGlobal;
 
         // non-parametric rbf
         if(numNeighbors == 1)
@@ -1315,7 +1319,7 @@ struct ClusterData {
                 double sum = 0;
                 for (int k = 0; k < nMatches; k++) {
                     int j = matches[k].first;
-                    double r = rbf(sqrt(matches[k].second));
+                    double r = rbf(sqrt(matches[k].second),rbfShape);
                     matches[k].second = r;
                     sum += r;
                 }
@@ -1350,7 +1354,7 @@ struct ClusterData {
                 double sum = 0;
                 for (int k = 0; k < numNeighborsInterp; k++) {
                     int j = indices[k];
-                    double r = rbf(sqrt(distances[k]));
+                    double r = rbf(sqrt(distances[k]),rbfShape);
                     distances[k] = r;
                     sum += r;
                 }
@@ -1557,7 +1561,7 @@ int main(int argc, char** argv) {
     numNeighbors = 1;
     numNeighborsInterp = 32;
     numClustersPerRank = 1;
-    rbfShape = 0;
+    rbfShapeGlobal = 0;
     useCutoffRadius = false;
     cutoffRadius = 0.08;
     cutoffRadiusInterp = 0.64;
@@ -1598,7 +1602,7 @@ int main(int argc, char** argv) {
                     }
                 }
             } else if(*it == "-r" || *it == "--rbf-shape") {
-                rbfShape = stof(*++it);
+                rbfShapeGlobal = stof(*++it);
             } else if(*it == "-n" || *it == "--neighbors") {
                 numNeighbors = stoi(*++it);
             } else if(*it == "-ni" || *it == "--neighbors-interp") {
@@ -1632,7 +1636,7 @@ int main(int argc, char** argv) {
                   << "numDims: " << numDims << std::endl
                   << "numNeighbors: " << numNeighbors << std::endl
                   << "numNeighborsInterp: " << numNeighborsInterp << std::endl
-                  << "rbfShape: " << rbfShape << std::endl
+                  << "rbfShapeGlobal: " << rbfShapeGlobal << std::endl
                   << "useCutoffRadius: " << (useCutoffRadius ? "true" : "false") << std::endl
                   << "cutoffRadius: " << cutoffRadius << std::endl
                   << "cutoffRadiusInterp: " << cutoffRadiusInterp << std::endl
