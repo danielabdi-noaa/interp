@@ -61,6 +61,8 @@ static bool useTestField;
 // Average duplicate fields
 static bool averageDuplicates;
 constexpr double dupsTolerance = 1e-6;
+constexpr int kmeans_min_iterations = 10; 
+constexpr int kmeans_max_changes_factor = 100; 
 
 // mutex for cout 
 static std::mutex cout_mutex;
@@ -155,7 +157,7 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
         double maxDistance = 0.0;
         int newCenter;
 #pragma omp parallel for private(d)
-        for (int j = 0; j < numPoints; j++) {
+        for (int j = 0; j < numPoints; j += numClusters) {
             double minDistance = std::numeric_limits<double>::max();
             for (int m = 0; m < i; m++) {
                 d = points.col(j) - clusterCenters.col(m);
@@ -173,12 +175,12 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
 
     // Perform k-means clustering until the cluster assignments stop changing
     MatrixXd sumClusterCenters(numDims, numClusters);
-    bool converged = false;
+    int changed = std::numeric_limits<int>::max();
     int iterations = 0;
-    while (!converged) {
+    while (changed) {
 
         // Update the cluster assignments
-        converged = true;
+        changed = 0;
 #pragma omp parallel for private(d)
         for (int i = 0; i < numPoints; i++) {
             int closestCluster = -1;
@@ -194,7 +196,7 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
             }
             if (closestCluster != clusterAssignments(i)) {
                 clusterAssignments(i) = closestCluster;
-                converged = false;
+                changed++;
             }
         }
 
@@ -228,6 +230,9 @@ void kMeansClustering(const MatrixXd& points, int numPoints, int numClusters,
 
 
         iterations++;
+        std::cout << iterations << ". " << changed << std::endl;
+        if(iterations < kmeans_min_iterations) continue;
+        if(changed < (numPoints / kmeans_max_changes_factor)) break;
     }
 
     //Print final cluster sizes
@@ -1121,7 +1126,8 @@ struct ClusterData {
 
         // Finish
         cout_mutex.lock();
-        std::cout << "Found and averaged " << dups << " duplicates." << std::endl;
+        std::cout << "Found and averaged " << dups << " duplicates "
+                  << numPoints - dups << " left." << std::endl;
         cout_mutex.unlock();
 
         t.elapsed();
