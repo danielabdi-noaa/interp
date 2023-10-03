@@ -548,7 +548,7 @@ namespace GlobalData {
             size_t elements_read = 0;
             if(is_target) {
                 numPoints = g_numTargetPoints;
-                numFields = 0;
+                numFields = GlobalData::numFields;
             } else {
                 numPoints = g_numPoints;
                 numFields = GlobalData::numFields;
@@ -562,8 +562,14 @@ namespace GlobalData {
             for(int i = 0; i < numPoints; i++) {
                 for(int j = 0; j < numDims; j++)
                    elements_read += fscanf(fp, "%lf", &((*points)(j,i)));
-                for(int j = 0; j < numFields; j++)
-                   elements_read += fscanf(fp, "%lf", &((*fields)(j,i)));
+                if(is_target) {
+                    double v;
+                    for(int j = 0; j < numFields; j++)
+                       elements_read += fscanf(fp, "%lf", &v);
+                } else {
+                    for(int j = 0; j < numFields; j++)
+                       elements_read += fscanf(fp, "%lf", &((*fields)(j,i)));
+                }
             }
         // Binary input file
         } else if(src.find("grib") == string::npos) {
@@ -571,7 +577,7 @@ namespace GlobalData {
             size_t elements_read = 0;
             if(is_target) {
                 numPoints = g_numTargetPoints;
-                numFields = 0;
+                numFields = GlobalData::numFields;
             } else {
                 numPoints = g_numPoints;
                 numFields = GlobalData::numFields;
@@ -590,9 +596,14 @@ namespace GlobalData {
                     elements_read += fread(&v, sizeof(v), 1, fp);
                     (*points)(j,i) = v;
                 }
-                for(int j = 0; j < numFields; j++) {
-                    elements_read += fread(&v, sizeof(v), 1, fp);
-                    (*fields)(j,i) = v;
+                if(is_target) {
+                    for(int j = 0; j < numFields; j++)
+                        elements_read += fread(&v, sizeof(v), 1, fp);
+                } else {
+                    for(int j = 0; j < numFields; j++) {
+                        elements_read += fread(&v, sizeof(v), 1, fp);
+                        (*fields)(j,i) = v;
+                    }
                 }
             }
         // Grib2 file
@@ -1549,7 +1560,7 @@ void usage() {
               << "  -h, --help               Show this help message and exit." << std::endl
               << "  -i, --input              Input file in grib or other text/binary format containing coordinates and fields for interpolation." << std::endl
               << "  -o, --output             Output file in grib or other text/binary format containing the result of the interpolation." << std::endl
-              << "  -t, --template           Template grib or other text/binary file on which the output file will be based." << std::endl
+              << "  -t, --target             Target file in grib or other text/binary format containing points of interpolation." << std::endl
               << "  -c, --clusters-per-rank  Number of point clusters (point clouds) per MPI rank" << std::endl
               << "  -f, --fields             Comma-separated list of field indices in the grib file to be interpolated." << std::endl
               << "                           Use hyphens (-) to indicate a range of fields (e.g., 0-3 for fields 0, 1, 2)." << std::endl
@@ -1613,7 +1624,7 @@ int main(int argc, char** argv) {
                 src = *++it;
             } else if(*it == "-o" || *it == "--output") {
                 dst = *++it;
-            } else if(*it == "-t" || *it == "--template") {
+            } else if(*it == "-t" || *it == "--target") {
                 tmpl = *++it;
             } else if(*it == "-c" || *it == "--clusters-per-rank") {
                 numClustersPerRank = stoi(*++it);
