@@ -325,7 +325,7 @@ namespace GlobalData {
     constexpr int n_hgt_i =  (numDims == 3) ? 2 : 1;
     constexpr int n_lon_o = 240;
     constexpr int n_lat_o =  80;
-    constexpr int n_hgt_o =  (numDims == 3) ? 3 : 1;
+    constexpr int n_hgt_o =  (numDims == 3) ? 4 : 1;
 
     //random points are structured/unstructured
     constexpr bool source_is_structured = true;
@@ -342,6 +342,19 @@ namespace GlobalData {
         clusterSizes.resize(numClusters);
         target_clusterSizes.resize(numClusters);
         clusterCenters.resize(numDims,numClusters);
+    }
+    //test function
+    double test_function(double x, double y, double z) {
+        constexpr double pi = 3.14159265358979323846;
+#if 1
+        return sqrt( exp(x*cos(3*pi*x)) * exp(y*cos(3*pi*y)) ) + z;
+#elif 0
+        return (tanh(9*z - 9*y - 9*x) + 1) / 9;
+#elif 0
+        return cos(6*z)*(1.25 + cos(5.4*y)) / (6 + 6*pow(3*x-1.0,30));
+#elif 0
+        return exp((-81.0/16)*( x*x+y*y+z*z ))/3;
+#endif
     }
     //
     //read/generate target interpolation points
@@ -398,18 +411,14 @@ namespace GlobalData {
                     for(int j = 0; j < n_lon_o; j++) {
                         for(int k = 0; k < n_hgt_o; k++) {
                            int idx = i * n_lon_o * n_hgt_o + j * n_hgt_o + k;
-                           double x, y;
+                           double x, y, z;
                            x = lon_min + (j * (lon_max - lon_min)) / (n_lon_o - 1);
                            y = lat_min + (i * (lat_max - lat_min)) / (n_lat_o - 1);
                            (*target_points)(0, idx) = x;
                            (*target_points)(1, idx) = y;
                            if constexpr (numDims >= 3) {
-                               constexpr double pi = 3.14159265358979323846;
-                               x = 2 * (x - lon_min) / (lon_max - lon_min) - 1;
-                               y = 2 * (y - lat_min) / (lat_max - lat_min) - 1;
-                               double v = sqrt( exp(x*cos(3*pi*x)) * exp(y*cos(3*pi*y)) ) +
-                                          (hgt_min + k * (hgt_max - hgt_min) / n_hgt_o);
-                               (*target_points)(2, idx) = v;
+                               z = hgt_min + k * (hgt_max - hgt_min) / (n_hgt_o - 1);
+                               (*target_points)(2, idx) = z;
                            }
                         }
                     }
@@ -442,17 +451,15 @@ namespace GlobalData {
 
         for (int i = 0; i < numPoints; i++) {
             for(int j = 0; j < numFields; j++) {
+                double v;
                 p(0) = 2 * (points(0,i) - minC(0)) / (maxC(0) - minC(0)) - 1;
                 p(1) = 2 * (points(1,i) - minC(1)) / (maxC(1) - minC(1)) - 1;
-                if constexpr (numDims >= 3)
+                if constexpr (numDims >= 3) {
                     p(2) = 2 * (points(2,i) - minC(2)) / (maxC(2) - minC(2)) - 1;
-
-                const double x = p(0), y = p(1);
-                constexpr double pi = 3.14159265358979323846;
-                double v = sqrt( exp(x*cos(3*pi*x)) * exp(y*cos(3*pi*y)) ) * (j + 1);
-                if constexpr (numDims >= 3)
-                    v *= p(2);
-                fields(j, i) = v;
+                    v = test_function(p(0),p(1),p(2));
+                } else
+                    v = test_function(p(0),p(1),0);
+                fields(j, i) = v * (j + 1);
             }
         }
     }
@@ -487,18 +494,14 @@ namespace GlobalData {
                 for(int j = 0; j < n_lon_i; j++) {
                     for(int k = 0; k < n_hgt_i; k++) {
                        int idx = i * n_lon_i * n_hgt_i + j * n_hgt_i + k;
-                       double x, y;
+                       double x, y, z;
                        x = lon_min + (j * (lon_max - lon_min)) / (n_lon_i - 1);
                        y = lat_min + (i * (lat_max - lat_min)) / (n_lat_i - 1);
                        (*points)(0, idx) = x;
                        (*points)(1, idx) = y;
                        if constexpr (numDims >= 3) {
-                           constexpr double pi = 3.14159265358979323846;
-                           x = 2 * (x - lon_min) / (lon_max - lon_min) - 1;
-                           y = 2 * (y - lat_min) / (lat_max - lat_min) - 1;
-                           double v = sqrt( exp(x*cos(3*pi*x)) * exp(y*cos(3*pi*y)) ) +
-                                      (hgt_min + k * (hgt_max - hgt_min) / n_hgt_o);
-                           (*points)(2, idx) = v;
+                           z = hgt_min + k * (hgt_max - hgt_min) / (n_hgt_o - 1);
+                           (*points)(2, idx) = z;
                        }
                     }
                 }
